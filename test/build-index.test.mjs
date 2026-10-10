@@ -6,7 +6,9 @@
  *
  * Nothing here touches the network or the disk: `buildIndex` and `main` take
  * every side effect as an argument, which is the only reason the partitioned
- * search and the rate-limit handling are testable at all.
+ * search, the release checks and the rate-limit handling are testable at all.
+ * Manifest validation has its own file; what is tested here is what the index
+ * does with the answer.
  */
 
 import { test } from 'node:test'
@@ -29,24 +31,29 @@ import {
   completeness,
   createFetchers,
   describeFailure,
+  flagNameConflicts,
   freshness,
   isUnchanged,
   main,
   manifestUrl,
-  parseManifest,
   popularity,
   rank,
+  releaseUrl,
+  repoWarnings,
   scoreEntry,
   searchRepos,
   searchUrl,
   serialize,
+  toEntry,
   toRepo,
+  verifyArtifact,
 } from '../scripts/build-index.mjs'
 
 const SCRIPT_PATH = fileURLToPath(new URL('../scripts/build-index.mjs', import.meta.url))
 
 const NOW = Date.parse('2026-10-10T00:00:00.000Z')
 const daysAgo = (days) => new Date(NOW - days * 86_400_000).toISOString()
+const SHA = 'a'.repeat(64)
 
 /** A search result item as GitHub returns one. */
 function item(overrides = {}) {
@@ -71,7 +78,43 @@ function item(overrides = {}) {
 }
 
 function manifestFor(name = 'jira', overrides = {}) {
-  return JSON.stringify({ name, version: '1.0.0', description: 'Does a thing.', license: 'MIT', ...overrides })
+  return JSON.stringify({
+    name,
+    version: '1.0.0',
+    description: 'Does a thing.',
+    license: 'MIT',
+    engines: { agentrq: '^1.4' },
+    artifact: { release: 'v1.0.0', asset: `${name}.tgz`, sha256: SHA },
+    ...overrides,
+  })
+}
+
+/** A release as the API returns one, carrying the asset the manifest names. */
+function releaseFor(name = 'jira', overrides = {}) {
+  return {
+    draft: false,
+    prerelease: false,
+    published_at: daysAgo(2),
+    assets: [{ name: `${name}.tgz`, size: 1024, browser_download_url: `https://github.com/acme/${name}/releases/x.tgz` }],
+    ...overrides,
+  }
+}
+
+/** An entry as `toEntry` returns one, for the scoring functions. */
+function entry(overrides = {}) {
+  return {
+    ok: true,
+    warnings: [],
+    fullName: 'acme/jira',
+    stars: 10,
+    pushedAt: daysAgo(1),
+    description: 'x',
+    license: 'MIT',
+    homepage: 'https://acme.test',
+    topics: ['jira'],
+    archived: false,
+    ...overrides,
+  }
 }
 
 /**
@@ -81,9 +124,14 @@ function manifestFor(name = 'jira', overrides = {}) {
  * Together they can express the one case that matters most and never happens in
  * a fixture taken from a live response: a total above the 1000 result cap.
  */
-function fakeGitHub({ totals = {}, itemsFor = () => [], manifests = {} } = {}) {
+function fakeGitHub({ totals = {}, itemsFor = () => [], manifests = {}, releases = {} } = {}) {
   const calls = []
   async function fetchJson(url) {
+    if (String(url).includes('/releases/tags/')) {
+      calls.push({ url })
+      const tag = String(url).split('/releases/tags/')[1]
+      return Object.prototype.hasOwnProperty.call(releases, tag) ? releases[tag] : null
+    }
     const parsed = new URL(url)
     const query = parsed.searchParams.get('q')
     const page = Number(parsed.searchParams.get('page'))
@@ -96,6 +144,8 @@ function fakeGitHub({ totals = {}, itemsFor = () => [], manifests = {} } = {}) {
   }
   return { fetchJson, fetchText, calls }
 }
+
+const manifestAt = (fullName, branch = 'main') => `https://raw.githubusercontent.com/${fullName}/${branch}/${MANIFEST_FILE}`
 
 test('buildQuery covers the whole topic, or one slice of it', () => {
   assert.equal(buildQuery(), `topic:${TOPIC}`)
@@ -112,10 +162,12 @@ test('searchUrl asks for full pages, most starred first', () => {
 })
 
 test('manifestUrl reads the default branch, whatever it is called', () => {
-  assert.equal(
-    manifestUrl({ fullName: 'acme/jira', defaultBranch: 'trunk' }),
-    `https://raw.githubusercontent.com/acme/jira/trunk/${MANIFEST_FILE}`,
-  )
+  assert.equal(manifestUrl({ fullName: 'acme/jira', defaultBranch: 'trunk' }), manifestAt('acme/jira', 'trunk'))
+})
+
+test('releaseUrl escapes a tag that is not url-safe', () => {
+  assert.equal(releaseUrl('acme/jira', 'v1.0.0'), 'https://api.github.com/repos/acme/jira/releases/tags/v1.0.0')
+  assert.match(releaseUrl('acme/jira', 'release/1 0'), /tags\/release%2F1%200$/)
 })
 
 test('toRepo keeps the fields the index publishes', () => {
@@ -198,7 +250,10 @@ test('searchRepos reports truncation rather than hiding it', async () => {
   const totals = { [`topic:${TOPIC}`]: 40_000 }
   for (const bucket of STAR_BUCKETS) totals[`topic:${TOPIC} stars:${bucket}`] = 0
   totals[`topic:${TOPIC} stars:0`] = 2000
-  const github = fakeGitHub({ totals, itemsFor: (query, page) => (query.endsWith('stars:0') ? [item({ full_name: `acme/z${page}` })] : []) })
+  const github = fakeGitHub({
+    totals,
+    itemsFor: (query, page) => (query.endsWith('stars:0') ? [item({ full_name: `acme/z${page}` })] : []),
+  })
 
   const { repos, truncated } = await searchRepos(github.fetchJson)
   assert.equal(truncated, true)
@@ -211,78 +266,93 @@ test('searchRepos treats a response with no body as no results', async () => {
   assert.equal(truncated, false)
 })
 
-test('parseManifest accepts a well-formed manifest and normalises it', () => {
-  const parsed = parseManifest(manifestFor('jira-issues', { keywords: ['jira', '', 'issues'] }))
-  assert.equal(parsed.ok, true)
-  assert.equal(parsed.manifest.name, 'jira-issues')
-  assert.equal(parsed.manifest.displayName, 'jira-issues', 'the name stands in when no display name is given')
-  assert.deepEqual(parsed.manifest.keywords, ['jira', 'issues'])
-  assert.equal(parsed.manifest.homepage, '')
+test('verifyArtifact has nothing to check when nothing is declared', async () => {
+  const result = await verifyArtifact({ fullName: 'acme/jira' }, null, async () => {
+    throw new Error('should not be called')
+  })
+  assert.deepEqual(result, { ok: true, warnings: [], asset: null })
 })
 
-test('parseManifest keeps a display name when there is one', () => {
-  const parsed = parseManifest(manifestFor('jira', { displayName: 'Jira Issues', homepage: 'https://x.test' }))
-  assert.equal(parsed.manifest.displayName, 'Jira Issues')
-  assert.equal(parsed.manifest.homepage, 'https://x.test')
+test('verifyArtifact confirms the asset the manifest pins, and describes it', async () => {
+  const github = fakeGitHub({ releases: { 'v1.0.0': releaseFor('jira') } })
+  const result = await verifyArtifact({ fullName: 'acme/jira' }, { release: 'v1.0.0', asset: 'jira.tgz', sha256: SHA }, github.fetchJson)
+
+  assert.equal(result.ok, true)
+  assert.deepEqual(result.warnings, [])
+  assert.equal(result.asset.size, 1024)
+  assert.match(result.asset.downloadUrl, /releases/)
 })
 
-test('parseManifest caps a keyword list rather than republishing an essay', () => {
-  const keywords = Array.from({ length: 40 }, (_, i) => `k${i}`)
-  assert.equal(parseManifest(manifestFor('jira', { keywords })).manifest.keywords.length, 16)
+test('verifyArtifact refuses a release that is not there', async () => {
+  const github = fakeGitHub({ releases: {} })
+  const result = await verifyArtifact({ fullName: 'acme/jira' }, { release: 'v9', asset: 'jira.tgz', sha256: SHA }, github.fetchJson)
+
+  assert.equal(result.ok, false)
+  assert.match(result.reason, /"v9", which is not a release/)
 })
 
-test('parseManifest ignores a keywords field that is not a list', () => {
-  assert.deepEqual(parseManifest(manifestFor('jira', { keywords: 'jira' })).manifest.keywords, [])
+test('verifyArtifact refuses a release that is missing the asset it names', async () => {
+  const github = fakeGitHub({ releases: { 'v1.0.0': releaseFor('jira', { assets: [{ name: 'other.tgz' }] }) } })
+  const result = await verifyArtifact({ fullName: 'acme/jira' }, { release: 'v1.0.0', asset: 'jira.tgz', sha256: SHA }, github.fetchJson)
+
+  assert.equal(result.ok, false)
+  assert.match(result.reason, /no asset named "jira.tgz"/)
 })
 
-test('parseManifest says a missing file is missing, by name', () => {
-  for (const absent of [null, undefined]) {
-    const parsed = parseManifest(absent)
-    assert.equal(parsed.ok, false)
-    assert.match(parsed.reason, new RegExp(MANIFEST_FILE))
-  }
+test('verifyArtifact copes with a release carrying no assets at all', async () => {
+  const github = fakeGitHub({ releases: { 'v1.0.0': {} } })
+  const result = await verifyArtifact({ fullName: 'acme/jira' }, { release: 'v1.0.0', asset: 'jira.tgz', sha256: SHA }, github.fetchJson)
+  assert.equal(result.ok, false)
 })
 
-test('parseManifest reports unparseable JSON with the parser reason', () => {
-  const parsed = parseManifest('{ nope')
-  assert.equal(parsed.ok, false)
-  assert.match(parsed.reason, /not valid JSON/)
+test('verifyArtifact warns about a draft or a pre-release rather than refusing it', async () => {
+  const github = fakeGitHub({ releases: { 'v1.0.0': releaseFor('jira', { draft: true, prerelease: true }) } })
+  const result = await verifyArtifact({ fullName: 'acme/jira' }, { release: 'v1.0.0', asset: 'jira.tgz', sha256: SHA }, github.fetchJson)
+
+  assert.equal(result.ok, true)
+  assert.equal(result.warnings.length, 2)
+  assert.match(result.warnings.join('\n'), /still a draft/)
+  assert.match(result.warnings.join('\n'), /pre-release/)
 })
 
-test('parseManifest refuses a document that is not an object', () => {
-  for (const source of ['[]', '"text"', 'null']) {
-    const parsed = parseManifest(source)
-    assert.equal(parsed.ok, false)
-    assert.match(parsed.reason, /must be a JSON object/)
-  }
+test('verifyArtifact downgrades a failed check to a warning', async () => {
+  // A timeout says nothing about the release. Blanking a working connector out
+  // of the index on a bad network day would be the worse answer.
+  const result = await verifyArtifact({ fullName: 'acme/jira' }, { release: 'v1', asset: 'a.tgz', sha256: SHA }, async () => {
+    throw new Error('fetch failed')
+  })
+  assert.equal(result.ok, true)
+  assert.match(result.warnings[0], /Could not check release "v1": fetch failed/)
 })
 
-test('parseManifest refuses a name that is not an address', () => {
-  for (const name of ['Jira Issues', 'jira_issues', '', 'jira--issues', '-jira']) {
-    const parsed = parseManifest(JSON.stringify({ name, version: '1.0.0', description: 'x', license: 'MIT' }))
-    assert.equal(parsed.ok, false, `"${name}" should not be a name`)
-    assert.match(parsed.reason, /"name"/)
-  }
+test('repoWarnings says when a repository is archived', () => {
+  assert.deepEqual(repoWarnings({ archived: false, license: '' }, null), [])
+  assert.match(repoWarnings({ archived: true, license: '' }, null)[0], /archived/)
 })
 
-test('parseManifest accepts the version shapes people actually publish', () => {
-  for (const version of ['1', '1.4', '1.4.2', 'v1.4.2', '1.4.2-rc.1']) {
-    assert.equal(parseManifest(manifestFor('jira', { version })).ok, true, version)
-  }
+test('repoWarnings catches a license the manifest and the repository disagree on', () => {
+  const warnings = repoWarnings({ archived: false, license: 'Apache-2.0' }, { license: 'MIT' })
+  assert.match(warnings[0], /says "MIT" but GitHub detects "Apache-2.0"/)
+
+  assert.deepEqual(repoWarnings({ archived: false, license: 'MIT' }, { license: 'MIT' }), [])
+  assert.deepEqual(repoWarnings({ archived: false, license: '' }, { license: 'MIT' }), [], 'GitHub detecting nothing is not a disagreement')
 })
 
-test('parseManifest refuses a version it could not compare', () => {
-  const parsed = parseManifest(manifestFor('jira', { version: 'latest' }))
-  assert.equal(parsed.ok, false)
-  assert.match(parsed.reason, /"version"/)
-})
+test('flagNameConflicts names both claimants and drops neither', () => {
+  const entries = [
+    entry({ fullName: 'acme/jira', manifest: { name: 'jira' } }),
+    entry({ fullName: 'other/jira', manifest: { name: 'jira' } }),
+    entry({ fullName: 'acme/slack', manifest: { name: 'slack' } }),
+    entry({ fullName: 'acme/broken', ok: false }),
+  ]
+  const flagged = flagNameConflicts(entries)
 
-test('parseManifest requires a description and a license', () => {
-  const noDescription = parseManifest(JSON.stringify({ name: 'jira', version: '1.0.0', license: 'MIT' }))
-  assert.match(noDescription.reason, /"description"/)
-
-  const noLicense = parseManifest(JSON.stringify({ name: 'jira', version: '1.0.0', description: 'x' }))
-  assert.match(noLicense.reason, /"license"/)
+  assert.deepEqual(flagged[0].nameConflict, ['other/jira'])
+  assert.deepEqual(flagged[1].nameConflict, ['acme/jira'])
+  assert.match(flagged[0].warnings[0], /also claimed by other\/jira/)
+  assert.equal(flagged[2].nameConflict, undefined)
+  assert.equal(flagged[3].nameConflict, undefined, 'a broken manifest claims no name')
+  assert.equal(flagged.length, 4, 'the index cannot tell the original from the impostor, so it keeps both')
 })
 
 test('popularity is a log curve, flattening past the ceiling', () => {
@@ -310,46 +380,36 @@ test('freshness scores an unknown push date as nothing, and a future one as toda
 })
 
 test('completeness rewards a listing that introduces itself', () => {
-  const full = { ok: true, description: 'x', license: 'MIT', homepage: 'https://x.test', topics: ['jira'], archived: false }
-  assert.equal(completeness(full), 1)
+  assert.equal(completeness(entry()), 1)
+  assert.equal(
+    completeness(entry({ ok: false, warnings: ['x'], description: '', license: '', homepage: '', topics: [], archived: true })),
+    0,
+  )
+})
 
-  const bare = { ok: false, description: '', license: '', homepage: '', topics: [], archived: true }
-  assert.equal(completeness(bare), 0)
+test('completeness counts a warning against the listing', () => {
+  assert.ok(completeness(entry({ warnings: ['No "artifact" declared.'] })) < 1)
 })
 
 test('completeness accepts details the manifest carries instead of the repository', () => {
-  const entry = {
-    ok: true,
-    description: 'x',
-    license: '',
-    homepage: '',
-    topics: ['jira'],
-    archived: false,
-    manifest: { license: 'MIT', homepage: 'https://x.test' },
-  }
-  assert.equal(completeness(entry), 1)
+  assert.equal(completeness(entry({ license: '', homepage: '', manifest: { license: 'MIT', homepage: 'https://x.test' } })), 1)
 })
 
 test('scoreEntry sums the weights into a readable percent', () => {
-  const perfect = {
-    ok: true,
-    stars: 10_000,
-    pushedAt: daysAgo(0),
-    description: 'x',
-    license: 'MIT',
-    homepage: 'https://x.test',
-    topics: ['jira'],
-    archived: false,
-  }
-  assert.equal(scoreEntry(perfect, NOW), WEIGHTS.popularity + WEIGHTS.freshness + WEIGHTS.completeness)
-
-  const nothing = { ok: false, stars: 0, pushedAt: '', description: '', license: '', homepage: '', topics: [], archived: true }
-  assert.equal(scoreEntry(nothing, NOW), 0)
+  assert.equal(scoreEntry(entry({ stars: 10_000, pushedAt: daysAgo(0) }), NOW), 100)
+  assert.equal(
+    scoreEntry(
+      entry({ ok: false, warnings: ['x'], stars: 0, pushedAt: '', description: '', license: '', homepage: '', topics: [], archived: true }),
+      NOW,
+    ),
+    0,
+  )
+  assert.deepEqual(WEIGHTS, { popularity: 60, freshness: 30, completeness: 10 })
 })
 
 test('rank puts installable connectors above broken ones, whatever their stars', () => {
-  const broken = { ok: false, fullName: 'acme/broken', stars: 9000, pushedAt: daysAgo(0), description: 'x', license: 'MIT', homepage: '', topics: [], archived: false }
-  const working = { ok: true, fullName: 'acme/working', stars: 1, pushedAt: daysAgo(200), description: '', license: '', homepage: '', topics: [], archived: false }
+  const broken = entry({ ok: false, fullName: 'acme/broken', stars: 9000, pushedAt: daysAgo(0) })
+  const working = entry({ fullName: 'acme/working', stars: 1, pushedAt: daysAgo(200) })
 
   const ranked = rank([broken, working], NOW)
   assert.deepEqual(ranked.map((e) => e.fullName), ['acme/working', 'acme/broken'])
@@ -357,17 +417,70 @@ test('rank puts installable connectors above broken ones, whatever their stars',
 })
 
 test('rank breaks a tie the same way on every run', () => {
-  const base = { ok: true, stars: 5, pushedAt: daysAgo(10), description: 'x', license: 'MIT', homepage: '', topics: [], archived: false }
-  const entries = [{ ...base, fullName: 'z/one' }, { ...base, fullName: 'a/one' }]
+  const entries = [entry({ fullName: 'z/one' }), entry({ fullName: 'a/one' })]
   assert.deepEqual(rank(entries, NOW).map((e) => e.fullName), ['a/one', 'z/one'])
   assert.deepEqual(rank([...entries].reverse(), NOW).map((e) => e.fullName), ['a/one', 'z/one'])
 })
 
 test('rank prefers the more starred of two otherwise identical connectors', () => {
-  // Same score is reachable because the score is rounded; stars decide it.
-  const base = { ok: true, pushedAt: daysAgo(10), description: 'x', license: 'MIT', homepage: '', topics: [], archived: false }
-  const ranked = rank([{ ...base, fullName: 'a/low', stars: 1 }, { ...base, fullName: 'b/high', stars: 1 }], NOW)
+  const ranked = rank([entry({ fullName: 'a/low', stars: 1 }), entry({ fullName: 'b/high', stars: 1 })], NOW)
   assert.equal(ranked[0].rank, 1)
+})
+
+test('toEntry publishes a connector whose manifest and release both check out', async () => {
+  const github = fakeGitHub({
+    manifests: { [manifestAt('acme/jira')]: manifestFor('jira') },
+    releases: { 'v1.0.0': releaseFor('jira') },
+  })
+  const result = await toEntry(toRepo(item()), github)
+
+  assert.equal(result.ok, true)
+  assert.deepEqual(result.warnings, [])
+  assert.equal(result.manifest.name, 'jira')
+  assert.equal(result.asset.name, 'jira.tgz')
+})
+
+test('toEntry lists a repository with no manifest, with the reason', async () => {
+  const github = fakeGitHub({})
+  const result = await toEntry(toRepo(item()), github)
+
+  assert.equal(result.ok, false)
+  assert.match(result.reason, new RegExp(MANIFEST_FILE))
+  assert.deepEqual(result.warnings, [])
+})
+
+test('toEntry distinguishes a manifest it could not read from one that is bad', async () => {
+  const result = await toEntry(toRepo(item()), {
+    fetchJson: async () => null,
+    fetchText: async () => {
+      throw new Error('fetch failed')
+    },
+  })
+  assert.match(result.reason, /Could not read .*fetch failed/)
+})
+
+test('toEntry marks a connector broken when the release it pins is gone', async () => {
+  const github = fakeGitHub({ manifests: { [manifestAt('acme/jira')]: manifestFor('jira') }, releases: {} })
+  const result = await toEntry(toRepo(item()), github)
+
+  assert.equal(result.ok, false)
+  assert.match(result.reason, /not a release of this repository/)
+  assert.equal(result.manifest.name, 'jira', 'the manifest is still published, so the author can see what was read')
+})
+
+test('toEntry gathers warnings from the manifest, the release and the repository', async () => {
+  const github = fakeGitHub({
+    manifests: { [manifestAt('acme/jira')]: manifestFor('jira', { license: 'Apache-2.0', extra: 1 }) },
+    releases: { 'v1.0.0': releaseFor('jira', { prerelease: true }) },
+  })
+  const result = await toEntry(toRepo(item({ archived: true })), github)
+
+  assert.equal(result.ok, true)
+  const text = result.warnings.join('\n')
+  assert.match(text, /Unknown key/)
+  assert.match(text, /pre-release/)
+  assert.match(text, /archived/)
+  assert.match(text, /says "Apache-2.0" but GitHub detects "MIT"/)
 })
 
 test('buildIndex reads every manifest and publishes a ranked index', async () => {
@@ -375,9 +488,10 @@ test('buildIndex reads every manifest and publishes a ranked index', async () =>
   const github = fakeGitHub({
     itemsFor: () => repos,
     manifests: {
-      [`https://raw.githubusercontent.com/acme/jira/main/${MANIFEST_FILE}`]: manifestFor('jira'),
-      [`https://raw.githubusercontent.com/acme/slack/main/${MANIFEST_FILE}`]: manifestFor('slack'),
+      [manifestAt('acme/jira')]: manifestFor('jira'),
+      [manifestAt('acme/slack')]: manifestFor('slack'),
     },
+    releases: { 'v1.0.0': { assets: [{ name: 'jira.tgz' }, { name: 'slack.tgz' }] } },
   })
 
   const index = await buildIndex({ ...github, now: () => NOW, concurrency: 1 })
@@ -386,31 +500,37 @@ test('buildIndex reads every manifest and publishes a ranked index', async () =>
   assert.equal(index.generatedAt, '2026-10-10T00:00:00.000Z')
   assert.equal(index.count, 2)
   assert.equal(index.ok, 2)
+  assert.equal(index.warned, 0)
   assert.deepEqual(index.weights, WEIGHTS)
   assert.deepEqual(index.connectors.map((c) => c.fullName), ['acme/slack', 'acme/jira'])
   assert.equal(index.connectors[0].manifest.name, 'slack')
 })
 
-test('buildIndex lists a repository with no manifest, with the reason', async () => {
-  const github = fakeGitHub({ itemsFor: () => [item()] })
+test('buildIndex counts the listings carrying a warning', async () => {
+  const github = fakeGitHub({
+    itemsFor: () => [item()],
+    manifests: { [manifestAt('acme/jira')]: manifestFor('jira', { artifact: undefined }) },
+  })
   const index = await buildIndex({ ...github, now: () => NOW })
 
-  assert.equal(index.count, 1)
-  assert.equal(index.ok, 0)
-  assert.equal(index.connectors[0].ok, false)
-  assert.match(index.connectors[0].reason, new RegExp(MANIFEST_FILE))
+  assert.equal(index.ok, 1)
+  assert.equal(index.warned, 1)
+  assert.match(index.connectors[0].warnings[0], /nothing for the app to install yet/)
 })
 
-test('buildIndex distinguishes a manifest it could not read from one that is bad', async () => {
-  const github = fakeGitHub({ itemsFor: () => [item()] })
-  const index = await buildIndex({
-    fetchJson: github.fetchJson,
-    fetchText: async () => {
-      throw new Error('fetch failed')
+test('buildIndex flags two repositories claiming the same connector name', async () => {
+  const repos = [item(), item({ full_name: 'other/jira', name: 'jira' })]
+  const github = fakeGitHub({
+    itemsFor: () => repos,
+    manifests: {
+      [manifestAt('acme/jira')]: manifestFor('jira', { artifact: undefined }),
+      [manifestAt('other/jira')]: manifestFor('jira', { artifact: undefined }),
     },
-    now: () => NOW,
   })
-  assert.match(index.connectors[0].reason, /Could not read .*fetch failed/)
+
+  const index = await buildIndex({ ...github, now: () => NOW })
+  assert.equal(index.count, 2)
+  assert.deepEqual(index.connectors[0].nameConflict, [index.connectors[1].fullName])
 })
 
 test('buildIndex works through a long list in bounded batches', async () => {
@@ -426,7 +546,7 @@ test('buildIndex works through a long list in bounded batches', async () => {
       peak = Math.max(peak, inFlight)
       await new Promise((resolve) => setImmediate(resolve))
       inFlight -= 1
-      return manifestFor(url.split('/')[4])
+      return manifestFor(url.split('/')[4], { artifact: undefined })
     },
     now: () => NOW,
     concurrency: 4,
@@ -453,8 +573,7 @@ test('isUnchanged ignores the timestamp, and nothing else', () => {
 })
 
 test('serialize writes a readable file that ends in a newline', () => {
-  const text = serialize({ count: 0 })
-  assert.equal(text, '{\n  "count": 0\n}\n')
+  assert.equal(serialize({ count: 0 }), '{\n  "count": 0\n}\n')
 })
 
 test('describeFailure finds a message in whatever it is handed', () => {
@@ -523,7 +642,7 @@ test('main writes the index and reports the change', async () => {
   assert.equal(written.length, 1)
   assert.equal(JSON.parse(written[0]).count, 1)
   assert.deepEqual(outputs, [true])
-  assert.match(logs[0], /1 connectors/)
+  assert.match(logs[0], /1 connectors \(0 installable, 0 with warnings\)/)
   assert.equal(index.count, 1)
 })
 

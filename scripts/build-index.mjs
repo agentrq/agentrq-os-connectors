@@ -39,11 +39,12 @@
 import { writeFile, readFile } from 'node:fs/promises'
 import { argv, env, exit } from 'node:process'
 
+import { MANIFEST_FILE, parseManifest } from './manifest.mjs'
+
+export { MANIFEST_FILE }
+
 /** The topic that makes a repository findable as a connector. */
 export const TOPIC = 'agentrq-connector'
-
-/** The file at the root of a connector repository that describes it. */
-export const MANIFEST_FILE = 'agentrq-connector.json'
 
 /** GitHub's maximum page size, and its hard ceiling on any single search. */
 export const SEARCH_PAGE_SIZE = 100
@@ -152,76 +153,6 @@ async function drainPages(fetchJson, query, total, first) {
   return repos.slice(0, reachable)
 }
 
-/** A name is an address, not a label: it ends up in routes and directory names. */
-const NAME_RE = /^[a-z0-9]+(-[a-z0-9]+)*$/
-const VERSION_RE = /^v?\d+(\.\d+){0,2}(-[0-9A-Za-z.-]+)?$/
-
-const fail = (reason) => ({ ok: false, reason })
-const str = (value) => (typeof value === 'string' ? value.trim() : '')
-
-/**
- * Reads a manifest and says whether it is one.
- *
- * **Structural only, and deliberately shallow.** This index does not install
- * anything; the app does, and the app re-validates in full against the version
- * of itself that is actually running. Duplicating the whole manifest grammar
- * here would mean a connector could be declared broken by a nightly job running
- * rules older or newer than any user's install — a verdict nobody could act on.
- * So this checks the four fields that make a listing meaningful and leaves the
- * rest to the installer.
- *
- * Every rejection carries a reason, and the reason is copy: a repository with
- * the topic and a bad manifest is *listed as broken with its reason* rather than
- * quietly dropped. The author needs to see why, and a silently missing connector
- * is undebuggable for them.
- */
-export function parseManifest(source) {
-  if (source === null || source === undefined) {
-    return fail(`No ${MANIFEST_FILE} at the root of this repository's default branch.`)
-  }
-
-  let doc
-  try {
-    doc = JSON.parse(source)
-  } catch (error) {
-    return fail(`${MANIFEST_FILE} is not valid JSON: ${error.message}`)
-  }
-  if (!doc || typeof doc !== 'object' || Array.isArray(doc)) {
-    return fail(`${MANIFEST_FILE} must be a JSON object.`)
-  }
-
-  const name = str(doc.name)
-  if (!NAME_RE.test(name)) {
-    return fail(`"name" must be lowercase words joined by single hyphens, such as "jira-issues". Got "${name || '(none)'}".`)
-  }
-
-  const version = str(doc.version)
-  if (!VERSION_RE.test(version)) {
-    return fail(`"version" must look like "1.4.0". Got "${version || '(none)'}".`)
-  }
-
-  const description = str(doc.description)
-  if (!description) return fail('"description" is required — one sentence saying what this connector does.')
-
-  const license = str(doc.license)
-  if (!license) {
-    return fail('"license" is required. Use an SPDX identifier such as "MIT", or "UNLICENSED" if no permission is granted.')
-  }
-
-  return {
-    ok: true,
-    manifest: {
-      name,
-      displayName: str(doc.displayName) || name,
-      version,
-      description,
-      license,
-      homepage: str(doc.homepage),
-      keywords: Array.isArray(doc.keywords) ? doc.keywords.map(str).filter(Boolean).slice(0, 16) : [],
-    },
-  }
-}
-
 /**
  * How much each signal is worth. They sum to 100, so a score reads as a percent.
  *
@@ -271,6 +202,7 @@ export function freshness(pushedAt, now) {
 export function completeness(entry) {
   const checks = [
     entry.ok,
+    entry.warnings.length === 0,
     Boolean(entry.description),
     Boolean(entry.license || entry.manifest?.license),
     Boolean(entry.homepage || entry.manifest?.homepage),
@@ -317,6 +249,130 @@ export function rank(entries, now) {
     .map((entry, i) => ({ rank: i + 1, ...entry }))
 }
 
+/** Turns a failure into something worth putting in front of a person. */
+export function describeFailure(error) {
+  return String(error?.message ?? error ?? 'Unknown error')
+}
+
+/** The release a manifest pins its artifact to. */
+export function releaseUrl(fullName, tag) {
+  return `https://api.github.com/repos/${fullName}/releases/tags/${encodeURIComponent(tag)}`
+}
+
+/**
+ * Whether the release a manifest pins actually exists, with the asset it names.
+ *
+ * This is the one check that leaves the document, and it is the reason the index
+ * can claim any authority at all. Everything else says the manifest is
+ * well-formed; this says the thing it promises is really there. A release tag
+ * that was deleted, renamed, or never cut is otherwise invisible until somebody
+ * tries to install — and at that point the failure looks like the app's fault.
+ *
+ * A *missing* release or asset is an error, because it is a fact, checked at the
+ * same moment for everyone. A request that merely *failed* is not: a timeout
+ * says nothing about the release, so it downgrades to a warning rather than
+ * blanking a working connector out of the index on a bad network day.
+ */
+export async function verifyArtifact(repo, artifact, fetchJson) {
+  if (!artifact) return { ok: true, warnings: [], asset: null }
+
+  let release
+  try {
+    release = await fetchJson(releaseUrl(repo.fullName, artifact.release))
+  } catch (error) {
+    return {
+      ok: true,
+      warnings: [`Could not check release "${artifact.release}": ${describeFailure(error)}`],
+      asset: null,
+    }
+  }
+
+  if (release === null) {
+    return { ok: false, reason: `"artifact.release" names "${artifact.release}", which is not a release of this repository.` }
+  }
+  const asset = (release.assets ?? []).find((candidate) => candidate?.name === artifact.asset)
+  if (!asset) {
+    return {
+      ok: false,
+      reason: `Release "${artifact.release}" has no asset named "${artifact.asset}".`,
+    }
+  }
+
+  const warnings = []
+  if (release.draft) warnings.push(`Release "${artifact.release}" is still a draft, so nobody else can download it.`)
+  if (release.prerelease) warnings.push(`Release "${artifact.release}" is marked as a pre-release.`)
+
+  return {
+    ok: true,
+    warnings,
+    asset: {
+      name: asset.name,
+      size: asset.size ?? 0,
+      downloadUrl: asset.browser_download_url ?? '',
+      publishedAt: release.published_at ?? '',
+    },
+  }
+}
+
+/**
+ * Warnings about the repository rather than the document inside it.
+ *
+ * A manifest can be perfect and the listing still be worth a caveat. These are
+ * the ones a reader would want before clicking install, and that the author can
+ * see and fix.
+ */
+export function repoWarnings(repo, manifest) {
+  const warnings = []
+  if (repo.archived) {
+    warnings.push('This repository is archived, so it is not being maintained.')
+  }
+  if (manifest && repo.license && manifest.license !== repo.license) {
+    // Two different answers to "what may I do with this" is exactly the kind of
+    // thing nobody notices until it matters, and the index is the only place
+    // both are visible at once.
+    warnings.push(
+      `The manifest says "${manifest.license}" but GitHub detects "${repo.license}" in the repository. ` +
+        'One of the two is wrong, and a reader cannot tell which.',
+    )
+  }
+  return warnings
+}
+
+/**
+ * Flags connectors that claim the same name as another.
+ *
+ * `name` is an address: it is the install directory and the registry key, so two
+ * connectors answering to one name is a collision, not a coincidence. It is
+ * *not* grounds for dropping either — the index has no way to tell the original
+ * from the impostor, and quietly hiding one would be the index taking a side it
+ * cannot defend. Both are listed, both say who they collide with, and the person
+ * reading decides.
+ */
+export function flagNameConflicts(entries) {
+  const byName = new Map()
+  for (const entry of entries) {
+    if (!entry.ok) continue
+    const claimants = byName.get(entry.manifest.name) ?? []
+    claimants.push(entry.fullName)
+    byName.set(entry.manifest.name, claimants)
+  }
+
+  return entries.map((entry) => {
+    const claimants = entry.ok ? byName.get(entry.manifest.name) : undefined
+    if (!claimants || claimants.length < 2) return entry
+
+    const others = claimants.filter((fullName) => fullName !== entry.fullName)
+    return {
+      ...entry,
+      nameConflict: others,
+      warnings: [
+        ...entry.warnings,
+        `The name "${entry.manifest.name}" is also claimed by ${others.join(', ')}.`,
+      ],
+    }
+  })
+}
+
 /** Runs `worker` over `items`, a few at a time, to stay under the burst limits. */
 async function pooled(items, limit, worker) {
   const out = []
@@ -326,13 +382,43 @@ async function pooled(items, limit, worker) {
   return out
 }
 
-/** Turns a failure into something worth putting in front of a person. */
-export function describeFailure(error) {
-  return String(error?.message ?? error ?? 'Unknown error')
+/**
+ * One listing: a repository, and either its connector or why it has none.
+ *
+ * @param {(url: string) => Promise<any>} fetchJson
+ * @param {(url: string) => Promise<string|null>} fetchText
+ */
+export async function toEntry(repo, { fetchJson, fetchText }) {
+  let parsed
+  try {
+    parsed = parseManifest(await fetchText(manifestUrl(repo)))
+  } catch (error) {
+    // A manifest we could not fetch is not a manifest we know to be bad. Say
+    // which happened, so an author chasing a listing is not sent to look at a
+    // file that is perfectly fine.
+    return { ...repo, ok: false, warnings: [], reason: `Could not read ${MANIFEST_FILE}: ${describeFailure(error)}` }
+  }
+  if (!parsed.ok) return { ...repo, ok: false, warnings: [], reason: parsed.reason }
+
+  const release = await verifyArtifact(repo, parsed.manifest.artifact, fetchJson)
+  if (!release.ok) {
+    // The manifest parses; the thing it points at does not exist. That is still
+    // a connector nobody can install, so it is listed as broken — with the
+    // reason naming the release, which is where the author has to go and look.
+    return { ...repo, ok: false, warnings: parsed.warnings, reason: release.reason, manifest: parsed.manifest }
+  }
+
+  return {
+    ...repo,
+    ok: true,
+    manifest: parsed.manifest,
+    asset: release.asset,
+    warnings: [...parsed.warnings, ...release.warnings, ...repoWarnings(repo, parsed.manifest)],
+  }
 }
 
 /**
- * The whole index: search, read every manifest, score, order.
+ * The whole index: search, read and check every manifest, score, order.
  *
  * @param {object} deps
  * @param {(url: string) => Promise<any>} deps.fetchJson   Resolves null on 404.
@@ -344,20 +430,9 @@ export async function buildIndex({ fetchJson, fetchText, now = () => Date.now(),
   const at = now()
   const found = await searchRepos(fetchJson)
 
-  const entries = await pooled(found.repos, concurrency, async (repo) => {
-    let parsed
-    try {
-      parsed = parseManifest(await fetchText(manifestUrl(repo)))
-    } catch (error) {
-      // A manifest we could not fetch is not a manifest we know to be bad. Say
-      // which happened, so an author chasing a listing is not sent to look at a
-      // file that is perfectly fine.
-      parsed = { ok: false, reason: `Could not read ${MANIFEST_FILE}: ${describeFailure(error)}` }
-    }
-    return parsed.ok ? { ...repo, ok: true, manifest: parsed.manifest } : { ...repo, ok: false, reason: parsed.reason }
-  })
+  const entries = await pooled(found.repos, concurrency, (repo) => toEntry(repo, { fetchJson, fetchText }))
+  const ranked = rank(flagNameConflicts(entries), at)
 
-  const ranked = rank(entries, at)
   return {
     schemaVersion: SCHEMA_VERSION,
     topic: TOPIC,
@@ -366,6 +441,7 @@ export async function buildIndex({ fetchJson, fetchText, now = () => Date.now(),
     truncated: found.truncated,
     count: ranked.length,
     ok: ranked.filter((entry) => entry.ok).length,
+    warned: ranked.filter((entry) => entry.warnings.length > 0).length,
     weights: WEIGHTS,
     connectors: ranked,
   }
@@ -445,7 +521,10 @@ export async function main({
 
   const changed = !isUnchanged(previous, index)
   if (changed) await write(serialize(index))
-  log(`${index.count} connectors (${index.ok} installable). ${changed ? 'Index updated.' : 'No change.'}`)
+  log(
+    `${index.count} connectors (${index.ok} installable, ${index.warned} with warnings). ` +
+      `${changed ? 'Index updated.' : 'No change.'}`,
+  )
   await setOutput(changed)
   return { changed, index }
 }
