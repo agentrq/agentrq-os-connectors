@@ -1,11 +1,12 @@
 # Copyright 2026 Contextual, Inc. https://agentrq.com
 # This notice may not be modified or removed.
 
-# Rebuilds the public connector index.
+# Rebuilds the public connector catalogue.
 #
-# Runs on a schedule rather than on demand because the app reads the committed
-# file, not GitHub's search API: the whole point of this repository is that one
-# machine spends the rate limit once a day so no install ever has to.
+# Runs on a schedule rather than on demand because a server reads the committed
+# file through CONNECTORS_PUBLIC_CATALOG_URL, not GitHub's search API: the whole
+# point of this repository is that one machine spends the rate limit once a day
+# so no install ever has to.
 name: Update connectors
 
 on:
@@ -21,6 +22,7 @@ on:
     # until tomorrow.
     paths:
       - 'scripts/build-index.mjs'
+      - 'scripts/manifest.mjs'
       - '.github/workflows/update-connectors.yml'
 
 # A scheduled run and a manual one can collide. The newer one has strictly fresher
@@ -46,20 +48,20 @@ jobs:
       - name: Verify the builder before trusting its output
         run: npm test
 
-      - name: Rebuild the index
+      - name: Rebuild the catalogue
         id: build
         env:
           # 5,000 requests an hour instead of 60, and it is already here.
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: npm run build
 
-      - name: Commit the index
+      - name: Commit the catalogue
         if: steps.build.outputs.changed == 'true'
         run: |
           git config user.name 'github-actions[bot]'
           git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
           git add connectors.json
-          git commit -m 'chore: update connector index'
+          git commit -m 'chore: update the connector catalogue'
           # The schedule is daily and the job is cancelled by a newer run, so a
           # push that lost a race is a stale result, not one worth retrying.
           git push
@@ -67,8 +69,8 @@ jobs:
       - name: Report
         run: |
           if [ '${{ steps.build.outputs.changed }}' = 'true' ]; then
-            echo "### Connector index updated" >> "$GITHUB_STEP_SUMMARY"
+            echo "### Connector catalogue updated" >> "$GITHUB_STEP_SUMMARY"
           else
-            echo "### No change to the connector index" >> "$GITHUB_STEP_SUMMARY"
+            echo "### No change to the connector catalogue" >> "$GITHUB_STEP_SUMMARY"
           fi
-          jq -r '"\(.count) connectors, \(.ok) installable, generated \(.generatedAt)"' connectors.json >> "$GITHUB_STEP_SUMMARY"
+          jq -r '"\(.counts.listed) listed, \(.counts.warned) with warnings, \(.counts.excluded) excluded, generated \(.generatedAt)"' connectors.json >> "$GITHUB_STEP_SUMMARY"

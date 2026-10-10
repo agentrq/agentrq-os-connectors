@@ -1,57 +1,73 @@
 // Copyright 2026 Contextual, Inc. https://agentrq.com
 // This notice may not be modified or removed.
+// SPDX-License-Identifier: AGPL-3.0-only
 
 /**
- * The public connector index, and how it is built.
+ * The public connector catalogue, and how it is built.
  *
- * A connector is a GitHub repository carrying the `agentrq-connector` topic and
- * an `agentrq-connector.json` at its root. The topic makes it findable; anyone
- * may publish by adding it. There is no registry to run, no submission flow and
- * nobody arbitrating a namespace — which is why the index carries an owner and a
- * star count rather than a badge. **Discovery is not endorsement.**
+ * A connector is an MCP server compiled to a wasm component, published by adding
+ * the `agentrq-connector` topic to a GitHub repository and attaching the
+ * component to a release. A remote MCP server is published the same way under
+ * `agentrq-remote-connector`. Anyone may publish either; there is no registry to
+ * run and nobody arbitrating a namespace, which is why a row carries an owner, a
+ * star count and a licence rather than a badge. **Discovery is not endorsement.**
  *
- * ## Why this repository exists at all
+ * ## What this file is, exactly
  *
- * The app used to run this search itself, against api.github.com, from every
- * install. GitHub's search allows ten requests a minute unauthenticated, so a
- * popular release spends that budget on the first few people to open the panel
- * and the rest see an empty catalogue. Here the search runs once a day, on one
- * machine, with a token, and every install reads one static JSON file off a CDN
- * that has no rate limit worth the name.
+ * `connectors.json` is what the server reads for public discovery, through
+ * `CONNECTORS_PUBLIC_CATALOG_URL`. Its `repositories` array is the shape
+ * `PublicList` deserialises in `crates/infrastructure/src/github_catalog.rs` of
+ * `agentrq/connectors`, field for field — **that is a compatibility contract, and
+ * the one thing here that cannot change freely.**
  *
- * It also makes the list *reviewable*: the ranking is a commit, so a connector
- * appearing, moving or vanishing shows up in `git log` instead of happening
- * silently inside somebody's app.
+ * Everything else this publishes — the ranking, the warnings, the connectors
+ * each repository declares — rides along as extra keys. `PublicList` and
+ * `Repository` do not use `deny_unknown_fields`, so a server reading this file
+ * ignores every one of them. That is what makes the catalogue richer than the
+ * list it replaces without the server needing to know.
  *
- * ## Two GitHub limits shape everything below
+ * ## Why a file, rather than the search
  *
- * - **1000 results maximum** for any one search, however many exist. This is why
- *   the search is partitioned across star buckets rather than run once — the
- *   ceiling is not hypothetical, `topic:mcp-server` already returns well over
- *   28,000 repositories, of which only the first 1000 are reachable.
- * - **Secondary rate limits** on bursts. Hence the small concurrency pool rather
- *   than firing every manifest request at once.
- *
- * Everything that touches the network is injected, so the whole path is testable
- * without one.
+ * GitHub allows ten search requests a minute unauthenticated, thirty with a
+ * token, and caps any one search at 1000 results. A server searching for itself
+ * spends that budget on whoever opens Discover first. Here the search runs once
+ * a day, on one machine, with a token, and every install reads one static file
+ * off a CDN. It also makes the catalogue reviewable: a connector appearing,
+ * moving or being excluded is a commit, not something that happens silently
+ * inside somebody's server.
  */
 
 import { writeFile, readFile } from 'node:fs/promises'
 import { argv, env, exit } from 'node:process'
 
-import { MANIFEST_FILE, parseManifest } from './manifest.mjs'
+import {
+  INDEX_FILE,
+  MANIFEST_FILE,
+  REMOTE_FILE,
+  ACCEPTED_LICENSES,
+  isAcceptedLicense,
+  licenseReason,
+  parseIndex,
+  parseManifest,
+  parseRemoteFile,
+} from './manifest.mjs'
 
-export { MANIFEST_FILE }
+export { INDEX_FILE, MANIFEST_FILE, REMOTE_FILE, ACCEPTED_LICENSES }
 
-/** The topic that makes a repository findable as a connector. */
-export const TOPIC = 'agentrq-connector'
+/** The topic that makes a repository findable as a wasm connector. */
+export const CATALOG_TOPIC = 'agentrq-connector'
+
+/** The topic for a repository that publishes a remote MCP server instead. */
+export const REMOTE_TOPIC = 'agentrq-remote-connector'
+
+export const TOPICS = [CATALOG_TOPIC, REMOTE_TOPIC]
 
 /** GitHub's maximum page size, and its hard ceiling on any single search. */
 export const SEARCH_PAGE_SIZE = 100
 export const SEARCH_RESULT_CAP = 1000
 
 /**
- * Star ranges the search is split across when one query cannot reach everything.
+ * Star ranges a search is split across when one query cannot reach everything.
  *
  * Split by stars rather than by date because the distribution is extreme — the
  * overwhelming majority of repositories have none — so the buckets get finer at
@@ -61,11 +77,13 @@ export const SEARCH_RESULT_CAP = 1000
 export const STAR_BUCKETS = ['>=1000', '200..999', '50..199', '10..49', '3..9', '1..2', '0']
 
 /** Bumped when the shape below changes in a way a reader has to know about. */
-export const SCHEMA_VERSION = 1
+export const SCHEMA_VERSION = 2
 
-/** The search query for the whole topic, or for one slice of it. */
-export function buildQuery(starRange = '') {
-  return starRange ? `topic:${TOPIC} stars:${starRange}` : `topic:${TOPIC}`
+export const COMMENT = 'Generated by scripts/build-index.mjs every day at 00:00 UTC; do not edit.'
+
+/** The search for public repositories with `topic`, or one slice of it. */
+export function buildQuery(topic, starRange = '') {
+  return starRange ? `topic:${topic} is:public stars:${starRange}` : `topic:${topic} is:public`
 }
 
 export function searchUrl(query, page) {
@@ -79,78 +97,288 @@ export function searchUrl(query, page) {
   return `https://api.github.com/search/repositories?${params}`
 }
 
-/** Where a repository's manifest lives, on whichever branch is its default. */
-export function manifestUrl({ fullName, defaultBranch }) {
-  return `https://raw.githubusercontent.com/${fullName}/${defaultBranch}/${MANIFEST_FILE}`
+/** A file at a repository's root, or anywhere else its index points. */
+export function rawUrl({ fullName, defaultBranch }, path) {
+  return `https://raw.githubusercontent.com/${fullName}/${defaultBranch}/${path}`
 }
 
-/** The fields of a search result the index actually publishes. */
+/** The repository's newest published release. */
+export function latestReleaseUrl(fullName) {
+  return `https://api.github.com/repos/${fullName}/releases/latest`
+}
+
+/**
+ * The fields of a search result the catalogue publishes.
+ *
+ * `repo` holds what the server reads, spelled exactly as `Repository`
+ * deserialises it — snake_case, nullable, GitHub's own names. The flat fields
+ * beside it are for everything here that would rather not write
+ * `item.stargazers_count` all day.
+ */
 export function toRepo(item) {
   const fullName = item?.full_name ?? ''
+  const description = item?.description ?? ''
+  const spdxId = item?.license?.spdx_id ?? ''
+  const topics = [...(item?.topics ?? [])].sort()
+
   return {
     fullName,
     owner: item?.owner?.login ?? fullName.split('/')[0] ?? '',
     name: item?.name ?? fullName.split('/')[1] ?? '',
-    description: item?.description ?? '',
-    homepage: item?.homepage ?? '',
-    license: item?.license?.spdx_id && item.license.spdx_id !== 'NOASSERTION' ? item.license.spdx_id : '',
-    topics: Array.isArray(item?.topics) ? item.topics.filter((t) => t !== TOPIC) : [],
+    description,
+    license: spdxId === 'NOASSERTION' ? '' : spdxId,
+    topics,
     stars: item?.stargazers_count ?? 0,
-    forks: item?.forks_count ?? 0,
-    openIssues: item?.open_issues_count ?? 0,
     archived: Boolean(item?.archived),
-    createdAt: item?.created_at ?? '',
     pushedAt: item?.pushed_at ?? '',
     defaultBranch: item?.default_branch || 'main',
     url: item?.html_url ?? `https://github.com/${fullName}`,
+    isRemote: topics.includes(REMOTE_TOPIC) && !topics.includes(CATALOG_TOPIC),
+    repo: {
+      full_name: fullName,
+      description: description || null,
+      stargazers_count: item?.stargazers_count ?? 0,
+      html_url: item?.html_url ?? `https://github.com/${fullName}`,
+      owner: item?.owner?.avatar_url ? { avatar_url: item.owner.avatar_url } : null,
+      license: spdxId ? { spdx_id: spdxId } : null,
+      pushed_at: item?.pushed_at ?? null,
+      topics,
+      private: false,
+    },
   }
 }
 
 /**
- * Every repository carrying the topic, across as many searches as it takes.
+ * Every public repository with either topic, across as many searches as it takes.
  *
- * Reports `truncated` when the ceiling genuinely could not be worked around — a
- * single star bucket holding more than a thousand repositories. Reported rather
- * than hidden: an index quietly missing entries is worse than one that says it
- * is incomplete, because from the outside the two look identical.
+ * Reports `truncated` when the 1000-result ceiling genuinely could not be worked
+ * around — a single star bucket of a single topic holding more than a thousand
+ * repositories. Reported rather than hidden: a catalogue quietly missing entries
+ * is worse than one that says it is incomplete, because from the outside the two
+ * look identical.
  */
 export async function searchRepos(fetchJson) {
-  const first = await fetchJson(searchUrl(buildQuery(), 1))
-  const total = first?.total_count ?? 0
-
-  if (total <= SEARCH_RESULT_CAP) {
-    return { repos: await drainPages(fetchJson, buildQuery(), total, first), truncated: false }
-  }
-
   const seen = new Map()
   let truncated = false
-  for (const bucket of STAR_BUCKETS) {
-    const query = buildQuery(bucket)
-    const head = await fetchJson(searchUrl(query, 1))
-    const count = head?.total_count ?? 0
-    if (count > SEARCH_RESULT_CAP) truncated = true
 
-    for (const repo of await drainPages(fetchJson, query, count, head)) {
-      // Buckets are disjoint, so this only guards against a repository gaining
-      // or losing a star between two requests — cheap insurance against a
-      // duplicate or a gap that would otherwise be invisible.
-      seen.set(repo.fullName, repo)
+  for (const topic of TOPICS) {
+    const first = await fetchJson(searchUrl(buildQuery(topic), 1))
+    const total = first?.total_count ?? 0
+
+    if (total <= SEARCH_RESULT_CAP) {
+      for (const repo of await drainPages(fetchJson, buildQuery(topic), total, first)) {
+        merge(seen, repo)
+      }
+      continue
+    }
+
+    for (const bucket of STAR_BUCKETS) {
+      const query = buildQuery(topic, bucket)
+      const head = await fetchJson(searchUrl(query, 1))
+      const count = head?.total_count ?? 0
+      if (count > SEARCH_RESULT_CAP) truncated = true
+      for (const repo of await drainPages(fetchJson, query, count, head)) {
+        merge(seen, repo)
+      }
     }
   }
   return { repos: [...seen.values()], truncated }
+}
+
+/**
+ * Keeps one entry per repository, with both topics if it carries both.
+ *
+ * A repository can hold both topics, and the two searches then return it twice.
+ * Taking the second blindly would lose nothing today, but a repository seen as
+ * remote-only in one pass and as a wasm connector in the other must end up
+ * listed as both, or whichever search ran last decides what it is.
+ */
+function merge(seen, repo) {
+  const existing = seen.get(repo.fullName)
+  if (!existing) {
+    seen.set(repo.fullName, repo)
+    return
+  }
+  const topics = [...new Set([...existing.topics, ...repo.topics])].sort()
+  seen.set(repo.fullName, {
+    ...repo,
+    topics,
+    isRemote: topics.includes(REMOTE_TOPIC) && !topics.includes(CATALOG_TOPIC),
+    repo: { ...repo.repo, topics },
+  })
 }
 
 /** Pages through one query, reusing the response that told us how many there are. */
 async function drainPages(fetchJson, query, total, first) {
   const reachable = Math.min(total, SEARCH_RESULT_CAP)
   const pages = Math.ceil(reachable / SEARCH_PAGE_SIZE)
-  const repos = (first?.items ?? []).map(toRepo)
+  const repos = (first?.items ?? []).filter((item) => !item?.private).map(toRepo)
 
   for (let page = 2; page <= pages; page += 1) {
     const body = await fetchJson(searchUrl(query, page))
-    repos.push(...(body?.items ?? []).map(toRepo))
+    repos.push(...(body?.items ?? []).filter((item) => !item?.private).map(toRepo))
   }
   return repos.slice(0, reachable)
+}
+
+/** Turns a failure into something worth putting in front of a person. */
+export function describeFailure(error) {
+  return String(error?.message ?? error ?? 'Unknown error')
+}
+
+/**
+ * The connectors a wasm repository publishes, read from its own documents.
+ *
+ * One connector lives in a `manifest.json` at the root. Several are listed in a
+ * `connectors-manifest.json`, which points at each one's manifest — so the index
+ * is read first, and the root manifest is only the fallback for a repository
+ * that has no index.
+ */
+export async function readConnectors(repo, fetchText) {
+  const indexSource = await fetchText(rawUrl(repo, INDEX_FILE))
+  const index = parseIndex(indexSource)
+  if (!index.ok) return { ok: false, reason: index.reason }
+
+  const paths = index.index ? index.index.manifests : [MANIFEST_FILE]
+  const warnings = [...(index.warnings ?? [])]
+  const connectors = []
+
+  for (const path of paths) {
+    const parsed = parseManifest(await fetchText(rawUrl(repo, path)), { path })
+    if (!parsed.ok) return { ok: false, reason: parsed.reason }
+    if (connectors.some((connector) => connector.name === parsed.manifest.name)) {
+      return { ok: false, reason: `${INDEX_FILE}: two of the manifests it lists are both named "${parsed.manifest.name}".` }
+    }
+    warnings.push(...parsed.warnings)
+    connectors.push({ ...parsed.manifest, path })
+  }
+
+  const bundles = index.index?.bundles ?? []
+  for (const bundle of bundles) {
+    const missing = bundle.connectors.filter((id) => !connectors.some((connector) => connector.name === id))
+    if (missing.length > 0) {
+      warnings.push(`${INDEX_FILE}: the bundle "${bundle.name}" lists ${missing.join(', ')}, which this repository does not publish.`)
+    }
+  }
+  return { ok: true, warnings, connectors, bundles }
+}
+
+/**
+ * Whether the latest release really carries the component for each connector.
+ *
+ * This is the check that leaves the documents, and the reason the catalogue can
+ * claim anything at all. Everything else says the manifests are well-formed;
+ * this says the thing they promise is there to install. A repository that
+ * publishes several must name each asset `<connector name>.wasm`; one that
+ * publishes a single connector may name its asset anything, so any `.wasm` will
+ * do.
+ *
+ * A request that *failed* is not the same as a release that is *absent*: a
+ * timeout says nothing about the release, so it warns rather than excluding a
+ * working connector from the catalogue on a bad network day.
+ */
+export async function verifyRelease(repo, connectors, fetchJson, { several }) {
+  let release
+  try {
+    release = await fetchJson(latestReleaseUrl(repo.fullName))
+  } catch (error) {
+    return { ok: true, warnings: [`Could not check the latest release: ${describeFailure(error)}`], release: null }
+  }
+  if (release === null) {
+    return { ok: false, reason: 'No published release, so there is no component to install.' }
+  }
+
+  const assets = (release.assets ?? []).filter((asset) => str(asset?.name).endsWith('.wasm'))
+  if (assets.length === 0) {
+    return { ok: false, reason: `Release "${release.tag_name ?? '(untagged)'}" has no .wasm asset.` }
+  }
+
+  const warnings = []
+  if (several) {
+    const missing = connectors.filter((connector) => !assets.some((asset) => asset.name === `${connector.name}.wasm`))
+    if (missing.length > 0) {
+      return {
+        ok: false,
+        reason:
+          `Release "${release.tag_name ?? '(untagged)'}" is missing ` +
+          `${missing.map((connector) => `"${connector.name}.wasm"`).join(', ')}. ` +
+          'A repository publishing several connectors must name each asset after its connector.',
+      }
+    }
+  }
+
+  const undigested = assets.filter((asset) => !asset.digest)
+  if (undigested.length > 0) {
+    // The server checks the component against the digest GitHub publishes. One
+    // that has none is installable but unverifiable, and the author is the only
+    // person who can do anything about that.
+    warnings.push(`GitHub publishes no digest for ${undigested.map((a) => `"${a.name}"`).join(', ')}, so an install cannot verify it.`)
+  }
+  if (release.prerelease) warnings.push(`The latest release, "${release.tag_name}", is marked as a pre-release.`)
+
+  return {
+    ok: true,
+    warnings,
+    release: {
+      tag: release.tag_name ?? '',
+      publishedAt: release.published_at ?? '',
+      assets: assets.map((asset) => ({ name: asset.name, size: asset.size ?? 0, digest: asset.digest ?? '' })),
+    },
+  }
+}
+
+const str = (value) => (typeof value === 'string' ? value.trim() : '')
+
+/**
+ * Warnings about the repository rather than the documents in it.
+ *
+ * A manifest can be perfect and the row still be worth a caveat. These are the
+ * ones a reader would want before installing, and that the author can fix.
+ */
+export function repoWarnings(repo) {
+  const warnings = []
+  if (repo.archived) warnings.push('This repository is archived, so it is not being maintained.')
+  if (!repo.description) warnings.push('The repository has no description, so search has less to match on.')
+  return warnings
+}
+
+/**
+ * One row: a repository, what it publishes, and the reason if it publishes nothing.
+ *
+ * The licence is checked first, and only for a wasm connector. A connector is
+ * code that runs on the user's machine with whatever its manifest asks for, so
+ * the terms it is offered under are part of the decision to install it rather
+ * than metadata. A remote connector is a pointer to somebody's hosted server —
+ * there is no code to be licensed — so the same rule applied there would be
+ * refusing to list a service over the licence of the repository that names it.
+ */
+export async function toEntry(repo, { fetchJson, fetchText }) {
+  if (!repo.isRemote && !isAcceptedLicense(repo.license)) {
+    return { ...repo, ok: false, warnings: [], reason: licenseReason(repo.license) }
+  }
+
+  if (repo.isRemote) {
+    const parsed = parseRemoteFile(await fetchText(rawUrl(repo, REMOTE_FILE)))
+    if (!parsed.ok) return { ...repo, ok: false, warnings: [], reason: parsed.reason }
+    return { ...repo, ok: true, remote: parsed.remote, connectors: [], bundles: [], warnings: [...parsed.warnings, ...repoWarnings(repo)] }
+  }
+
+  const read = await readConnectors(repo, fetchText)
+  if (!read.ok) return { ...repo, ok: false, warnings: [], reason: read.reason }
+
+  const release = await verifyRelease(repo, read.connectors, fetchJson, { several: read.connectors.length > 1 })
+  if (!release.ok) {
+    return { ...repo, ok: false, warnings: read.warnings, connectors: read.connectors, reason: release.reason }
+  }
+
+  return {
+    ...repo,
+    ok: true,
+    connectors: read.connectors,
+    bundles: read.bundles,
+    release: release.release,
+    warnings: [...read.warnings, ...release.warnings, ...repoWarnings(repo)],
+  }
 }
 
 /**
@@ -158,10 +386,10 @@ async function drainPages(fetchJson, query, total, first) {
  *
  * The weights encode an opinion worth stating plainly: popularity is the loudest
  * signal but not the only one, because a brand-new connector with no stars would
- * otherwise be unrankable and unfindable, and the list would calcify into
+ * otherwise be unrankable and unfindable, and the catalogue would calcify into
  * whatever was published first. Freshness is the counterweight — a connector
- * still being maintained outranks a more popular one that was abandoned two
- * years ago, which is the judgement a person browsing would make themselves.
+ * still being maintained outranks a more popular one abandoned two years ago,
+ * which is the judgement a person browsing would make themselves.
  */
 export const WEIGHTS = { popularity: 60, freshness: 30, completeness: 10 }
 
@@ -174,45 +402,42 @@ export const FRESHNESS_HALF_LIFE_DAYS = 90
 /**
  * Stars, on a log curve.
  *
- * Linear would make the whole list a footnote to whichever connector happened to
- * trend once: the distance from 0 to 50 stars is the meaningful one, and
- * linearly it is invisible next to the distance from 5,000 to 10,000.
+ * Linear would make the whole catalogue a footnote to whichever connector
+ * happened to trend once: the distance from 0 to 50 stars is the meaningful one,
+ * and linearly it is invisible next to 5,000 to 10,000.
  */
 export function popularity(stars) {
-  const safe = Math.max(0, Number(stars) || 0)
-  return clamp01(Math.log10(safe + 1) / Math.log10(STAR_CEILING + 1))
+  return clamp01(Math.log10(Math.max(0, Number(stars) || 0) + 1) / Math.log10(STAR_CEILING + 1))
 }
 
-/** Half-life decay on the last push. Unknown or future dates score as "today". */
+/** Half-life decay on the last push. Unknown dates score as nothing, future as today. */
 export function freshness(pushedAt, now) {
   const at = Date.parse(pushedAt ?? '')
   if (Number.isNaN(at)) return 0
-  const days = Math.max(0, (now - at) / 86_400_000)
-  return clamp01(2 ** (-days / FRESHNESS_HALF_LIFE_DAYS))
+  return clamp01(2 ** (-Math.max(0, (now - at) / 86_400_000) / FRESHNESS_HALF_LIFE_DAYS))
 }
 
 /**
- * Whether the listing is worth reading, which is the part an author controls.
+ * Whether the row is worth reading, which is the part an author controls.
  *
- * Unlike the other two this is not a measure of the project, it is a measure of
- * how well it introduces itself — and it is the one signal a new connector can
- * max out on day one. That is the point: it gives an author something to do
- * about their rank other than wait for stars.
+ * Unlike the other two this is not a measure of the project but of how well it
+ * introduces itself — and it is the one signal a new connector can max out on
+ * day one. That is the point: it gives an author something to do about their
+ * rank other than wait for stars.
  */
 export function completeness(entry) {
   const checks = [
-    entry.ok,
     entry.warnings.length === 0,
     Boolean(entry.description),
-    Boolean(entry.license || entry.manifest?.license),
-    Boolean(entry.homepage || entry.manifest?.homepage),
-    entry.topics.length > 0,
+    Boolean(entry.connectors?.some((connector) => connector.description) || entry.remote?.description),
+    Boolean(entry.connectors?.some((connector) => connector.icons > 0) || entry.remote),
+    entry.topics.length > 1,
     !entry.archived,
   ]
   return checks.filter(Boolean).length / checks.length
 }
 
-/** The published score: 0–100, two decimals, so a tie is a real tie. */
+/** The published score: 0-100, two decimals, so a tie is a real tie. */
 export function scoreEntry(entry, now) {
   const raw =
     WEIGHTS.popularity * popularity(entry.stars) +
@@ -226,151 +451,58 @@ function clamp01(value) {
 }
 
 /**
- * Orders the index and numbers it.
+ * Orders the catalogue and numbers it.
  *
- * Working connectors come before broken ones whatever their stars: a listing the
- * app cannot install is not a better result than one it can, and burying it is
- * the honest treatment of a repository that carries the topic but not a manifest.
- *
- * The last tiebreak is the full name, which is arbitrary but *stable* — without
- * it two equally-scored connectors could swap places on every nightly run and
- * every one of those runs would be a commit saying nothing happened.
+ * The server shows this order as it is given, so this is the ranking a person
+ * sees in Discover. The last tiebreak is the full name, which is arbitrary but
+ * *stable* — without it two equally-scored connectors could swap places on every
+ * nightly run, and every one of those runs would be a commit saying nothing.
  */
 export function rank(entries, now) {
   return entries
     .map((entry) => ({ ...entry, score: scoreEntry(entry, now) }))
-    .sort(
-      (a, b) =>
-        Number(b.ok) - Number(a.ok) ||
-        b.score - a.score ||
-        b.stars - a.stars ||
-        a.fullName.localeCompare(b.fullName),
-    )
+    .sort((a, b) => b.score - a.score || b.stars - a.stars || a.fullName.localeCompare(b.fullName))
     .map((entry, i) => ({ rank: i + 1, ...entry }))
 }
 
-/** Turns a failure into something worth putting in front of a person. */
-export function describeFailure(error) {
-  return String(error?.message ?? error ?? 'Unknown error')
-}
-
-/** The release a manifest pins its artifact to. */
-export function releaseUrl(fullName, tag) {
-  return `https://api.github.com/repos/${fullName}/releases/tags/${encodeURIComponent(tag)}`
-}
-
 /**
- * Whether the release a manifest pins actually exists, with the asset it names.
+ * Flags connectors that claim a name another repository also claims.
  *
- * This is the one check that leaves the document, and it is the reason the index
- * can claim any authority at all. Everything else says the manifest is
- * well-formed; this says the thing it promises is really there. A release tag
- * that was deleted, renamed, or never cut is otherwise invisible until somebody
- * tries to install — and at that point the failure looks like the app's fault.
- *
- * A *missing* release or asset is an error, because it is a fact, checked at the
- * same moment for everyone. A request that merely *failed* is not: a timeout
- * says nothing about the release, so it downgrades to a warning rather than
- * blanking a working connector out of the index on a bad network day.
- */
-export async function verifyArtifact(repo, artifact, fetchJson) {
-  if (!artifact) return { ok: true, warnings: [], asset: null }
-
-  let release
-  try {
-    release = await fetchJson(releaseUrl(repo.fullName, artifact.release))
-  } catch (error) {
-    return {
-      ok: true,
-      warnings: [`Could not check release "${artifact.release}": ${describeFailure(error)}`],
-      asset: null,
-    }
-  }
-
-  if (release === null) {
-    return { ok: false, reason: `"artifact.release" names "${artifact.release}", which is not a release of this repository.` }
-  }
-  const asset = (release.assets ?? []).find((candidate) => candidate?.name === artifact.asset)
-  if (!asset) {
-    return {
-      ok: false,
-      reason: `Release "${artifact.release}" has no asset named "${artifact.asset}".`,
-    }
-  }
-
-  const warnings = []
-  if (release.draft) warnings.push(`Release "${artifact.release}" is still a draft, so nobody else can download it.`)
-  if (release.prerelease) warnings.push(`Release "${artifact.release}" is marked as a pre-release.`)
-
-  return {
-    ok: true,
-    warnings,
-    asset: {
-      name: asset.name,
-      size: asset.size ?? 0,
-      downloadUrl: asset.browser_download_url ?? '',
-      publishedAt: release.published_at ?? '',
-    },
-  }
-}
-
-/**
- * Warnings about the repository rather than the document inside it.
- *
- * A manifest can be perfect and the listing still be worth a caveat. These are
- * the ones a reader would want before clicking install, and that the author can
- * see and fix.
- */
-export function repoWarnings(repo, manifest) {
-  const warnings = []
-  if (repo.archived) {
-    warnings.push('This repository is archived, so it is not being maintained.')
-  }
-  if (manifest && repo.license && manifest.license !== repo.license) {
-    // Two different answers to "what may I do with this" is exactly the kind of
-    // thing nobody notices until it matters, and the index is the only place
-    // both are visible at once.
-    warnings.push(
-      `The manifest says "${manifest.license}" but GitHub detects "${repo.license}" in the repository. ` +
-        'One of the two is wrong, and a reader cannot tell which.',
-    )
-  }
-  return warnings
-}
-
-/**
- * Flags connectors that claim the same name as another.
- *
- * `name` is an address: it is the install directory and the registry key, so two
- * connectors answering to one name is a collision, not a coincidence. It is
- * *not* grounds for dropping either — the index has no way to tell the original
- * from the impostor, and quietly hiding one would be the index taking a side it
- * cannot defend. Both are listed, both say who they collide with, and the person
- * reading decides.
+ * The name is the install directory, the registry key and the prefix of every
+ * command, so two repositories answering to one is a collision rather than a
+ * coincidence. It is *not* grounds for dropping either: the catalogue has no way
+ * to tell the original from the impostor, and quietly hiding one would be it
+ * taking a side it cannot defend. Both are listed, both say who they collide
+ * with, and the person reading decides.
  */
 export function flagNameConflicts(entries) {
   const byName = new Map()
   for (const entry of entries) {
-    if (!entry.ok) continue
-    const claimants = byName.get(entry.manifest.name) ?? []
-    claimants.push(entry.fullName)
-    byName.set(entry.manifest.name, claimants)
+    for (const name of namesOf(entry)) {
+      byName.set(name, [...(byName.get(name) ?? []), entry.fullName])
+    }
   }
 
   return entries.map((entry) => {
-    const claimants = entry.ok ? byName.get(entry.manifest.name) : undefined
-    if (!claimants || claimants.length < 2) return entry
+    const contested = namesOf(entry).filter((name) => byName.get(name).length > 1)
+    if (contested.length === 0) return entry
 
-    const others = claimants.filter((fullName) => fullName !== entry.fullName)
+    const others = [...new Set(contested.flatMap((name) => byName.get(name)))].filter((full) => full !== entry.fullName)
     return {
       ...entry,
       nameConflict: others,
       warnings: [
         ...entry.warnings,
-        `The name "${entry.manifest.name}" is also claimed by ${others.join(', ')}.`,
+        `${contested.length > 1 ? 'The names' : 'The name'} ${contested.map((n) => `"${n}"`).join(', ')} ` +
+          `${contested.length > 1 ? 'are' : 'is'} also claimed by ${others.join(', ')}.`,
       ],
     }
   })
+}
+
+function namesOf(entry) {
+  if (!entry.ok) return []
+  return entry.remote ? [entry.remote.name].filter(Boolean) : entry.connectors.map((connector) => connector.name)
 }
 
 /** Runs `worker` over `items`, a few at a time, to stay under the burst limits. */
@@ -383,42 +515,31 @@ async function pooled(items, limit, worker) {
 }
 
 /**
- * One listing: a repository, and either its connector or why it has none.
+ * The published row: the fields the server reads, then everything else.
  *
- * @param {(url: string) => Promise<any>} fetchJson
- * @param {(url: string) => Promise<string|null>} fetchText
+ * The server's half comes first and is spelled its way; the rest are extra keys
+ * it ignores, because neither `PublicList` nor `Repository` denies unknown
+ * fields. Anything added here must stay on the second half of that line.
  */
-export async function toEntry(repo, { fetchJson, fetchText }) {
-  let parsed
-  try {
-    parsed = parseManifest(await fetchText(manifestUrl(repo)))
-  } catch (error) {
-    // A manifest we could not fetch is not a manifest we know to be bad. Say
-    // which happened, so an author chasing a listing is not sent to look at a
-    // file that is perfectly fine.
-    return { ...repo, ok: false, warnings: [], reason: `Could not read ${MANIFEST_FILE}: ${describeFailure(error)}` }
-  }
-  if (!parsed.ok) return { ...repo, ok: false, warnings: [], reason: parsed.reason }
-
-  const release = await verifyArtifact(repo, parsed.manifest.artifact, fetchJson)
-  if (!release.ok) {
-    // The manifest parses; the thing it points at does not exist. That is still
-    // a connector nobody can install, so it is listed as broken — with the
-    // reason naming the release, which is where the author has to go and look.
-    return { ...repo, ok: false, warnings: parsed.warnings, reason: release.reason, manifest: parsed.manifest }
-  }
-
+export function toRow(entry) {
   return {
-    ...repo,
-    ok: true,
-    manifest: parsed.manifest,
-    asset: release.asset,
-    warnings: [...parsed.warnings, ...release.warnings, ...repoWarnings(repo, parsed.manifest)],
+    ...entry.repo,
+    rank: entry.rank,
+    score: entry.score,
+    warnings: entry.warnings,
+    ...(entry.nameConflict ? { nameConflict: entry.nameConflict } : {}),
+    ...(entry.remote
+      ? { remote: entry.remote }
+      : {
+          connectors: entry.connectors,
+          ...(entry.bundles.length > 0 ? { bundles: entry.bundles } : {}),
+          release: entry.release,
+        }),
   }
 }
 
 /**
- * The whole index: search, read and check every manifest, score, order.
+ * The whole catalogue: search, read what each repository publishes, rank.
  *
  * @param {object} deps
  * @param {(url: string) => Promise<any>} deps.fetchJson   Resolves null on 404.
@@ -431,24 +552,35 @@ export async function buildIndex({ fetchJson, fetchText, now = () => Date.now(),
   const found = await searchRepos(fetchJson)
 
   const entries = await pooled(found.repos, concurrency, (repo) => toEntry(repo, { fetchJson, fetchText }))
-  const ranked = rank(flagNameConflicts(entries), at)
+  const ranked = rank(flagNameConflicts(entries.filter((entry) => entry.ok)), at)
+
+  // Excluded rows keep the order the search gave them — by stars — because there
+  // is nothing to rank: they publish nothing the catalogue can offer.
+  const excluded = entries
+    .filter((entry) => !entry.ok)
+    .map((entry) => ({ full_name: entry.fullName, html_url: entry.url, license: entry.license || null, reason: entry.reason }))
 
   return {
+    $comment: COMMENT,
     schemaVersion: SCHEMA_VERSION,
-    topic: TOPIC,
-    manifest: MANIFEST_FILE,
     generatedAt: new Date(at).toISOString(),
-    truncated: found.truncated,
-    count: ranked.length,
-    ok: ranked.filter((entry) => entry.ok).length,
-    warned: ranked.filter((entry) => entry.warnings.length > 0).length,
+    topics: TOPICS,
+    acceptedLicenses: [...ACCEPTED_LICENSES],
     weights: WEIGHTS,
-    connectors: ranked,
+    truncated: found.truncated,
+    counts: {
+      found: entries.length,
+      listed: ranked.length,
+      excluded: excluded.length,
+      warned: ranked.filter((entry) => entry.warnings.length > 0).length,
+    },
+    repositories: ranked.map(toRow),
+    excluded,
   }
 }
 
 /**
- * Whether two indexes differ in anything a reader would care about.
+ * Whether two catalogues differ in anything a reader would care about.
  *
  * `generatedAt` changes on every run by definition. Committing on that alone
  * would put a commit a day into the history forever, and the one day something
@@ -464,21 +596,19 @@ export function serialize(index) {
   return `${JSON.stringify(index, null, 2)}\n`
 }
 
-/** GitHub's JSON API, with the token Actions already has. */
+/** GitHub's API, with the token Actions already has. */
 export function createFetchers(token = '', fetchImpl = fetch) {
   const headers = {
-    Accept: 'application/vnd.github+json',
-    'X-GitHub-Api-Version': '2022-11-28',
-    'User-Agent': 'agentrq-os-connectors-indexer',
-    ...(token ? { Authorization: `Bearer ${token}` } : {}),
+    accept: 'application/vnd.github+json',
+    'x-github-api-version': '2022-11-28',
+    'user-agent': 'agentrq-os-connectors-catalog',
+    ...(token ? { authorization: `Bearer ${token}` } : {}),
   }
 
   async function get(url, accept) {
-    const response = await fetchImpl(url, { headers: { ...headers, ...(accept ? { Accept: accept } : {}) } })
+    const response = await fetchImpl(url, { headers: { ...headers, ...(accept ? { accept } : {}) } })
     if (response.status === 404) return null
-    if (!response.ok) {
-      throw new Error(`${response.status} ${response.statusText} for ${url}`)
-    }
+    if (!response.ok) throw new Error(`${response.status} ${response.statusText} for ${url}`)
     return response
   }
 
@@ -489,7 +619,7 @@ export function createFetchers(token = '', fetchImpl = fetch) {
 }
 
 /**
- * Writes the index, and says whether anything moved.
+ * Writes the catalogue, and says whether anything moved.
  *
  * Exits 0 either way. A day on which no connector changed is a successful run,
  * not a failure, and a red cross on the schedule for it would train everyone to
@@ -512,18 +642,18 @@ export async function main({
   try {
     previous = JSON.parse(await readPrevious())
   } catch {
-    // No index yet, or one we cannot read. Either way this run writes a new one.
+    // No catalogue yet, or one we cannot read. Either way this run writes one.
   }
 
   if (index.truncated) {
-    log('warning: a single star bucket holds more than 1000 repositories; the index is incomplete.')
+    log('warning: a single star bucket holds more than 1000 repositories; the catalogue is incomplete.')
   }
 
   const changed = !isUnchanged(previous, index)
   if (changed) await write(serialize(index))
   log(
-    `${index.count} connectors (${index.ok} installable, ${index.warned} with warnings). ` +
-      `${changed ? 'Index updated.' : 'No change.'}`,
+    `${index.counts.listed} listed (${index.counts.warned} with warnings), ` +
+      `${index.counts.excluded} excluded. ${changed ? 'Catalogue updated.' : 'No change.'}`,
   )
   await setOutput(changed)
   return { changed, index }
