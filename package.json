@@ -9,7 +9,7 @@
   },
   "scripts": {
     "build": "node scripts/build-index.mjs",
-    "test": "node --test test/",
-    "coverage": "node --test --experimental-test-coverage test/"
+    "test": "node --test test/*.test.mjs",
+    "coverage": "node --test --experimental-test-coverage test/*.test.mjs"
   }
 }
