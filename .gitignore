@@ -1,0 +1,4 @@
+# Added by agentrqd: written per launch, and it holds this workspace's token
+.mcp.json
+
+node_modules/

@@ -1,0 +1,16 @@
+{
+  "schemaVersion": 1,
+  "topic": "agentrq-connector",
+  "manifest": "agentrq-connector.json",
+  "generatedAt": "2026-10-10T07:06:11.618Z",
+  "truncated": false,
+  "count": 0,
+  "ok": 0,
+  "warned": 0,
+  "weights": {
+    "popularity": 60,
+    "freshness": 30,
+    "completeness": 10
+  },
+  "connectors": []
+}
