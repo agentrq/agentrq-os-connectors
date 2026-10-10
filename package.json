@@ -3,7 +3,7 @@
   "private": true,
   "type": "module",
   "description": "The public index of AgentRQ connectors, rebuilt daily from the agentrq-connector GitHub topic.",
-  "license": "GPL-3.0-only",
+  "license": "AGPL-3.0-only",
   "engines": {
     "node": ">=20"
   },

@@ -211,4 +211,4 @@ Two GitHub limits shape it:
 
 ## License
 
-GPL-3.0-only. See [LICENSE](LICENSE).
+AGPL-3.0-only. See [LICENSE](LICENSE).
