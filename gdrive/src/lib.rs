@@ -144,69 +144,8 @@ fn outgoing(base: &str, request: &ToolRequest) -> Result<Request, ConnectorError
                 ],
             ))
         }
-        "createFile" => {
-            let input: CreateFile = request.json()?;
-            let metadata = object(&[
-                ("name", Some(json!(input.name))),
-                ("mimeType", input.mime_type.as_ref().map(|s| json!(s))),
-                ("parents", input.parents.as_ref().map(|p| json!(p))),
-                ("description", input.description.as_ref().map(|s| json!(s))),
-            ]);
-            match upload(
-                &metadata,
-                &input.content_base64,
-                input.content_mime_type.as_deref(),
-                input.mime_type.as_deref(),
-            )? {
-                Some((content_type, body)) => {
-                    let mut planned =
-                        Request::post(format!("{root}/upload/drive/v3/files?uploadType=multipart"));
-                    planned
-                        .headers
-                        .push(("content-type".to_string(), content_type));
-                    planned.body = body;
-                    planned
-                }
-                None => Request::post(&api).json(&metadata)?,
-            }
-        }
-        "updateFile" => {
-            let input: UpdateFile = request.json()?;
-            let metadata = object(&[
-                ("name", input.name.as_ref().map(|s| json!(s))),
-                ("description", input.description.as_ref().map(|s| json!(s))),
-                ("trashed", input.trashed.map(|b| json!(b))),
-            ]);
-            let url = with_query(
-                &format!("{api}/{}", encode(&input.file_id)),
-                &[
-                    ("addParents", input.add_parents.map(|p| p.join(","))),
-                    ("removeParents", input.remove_parents.map(|p| p.join(","))),
-                ],
-            );
-            match upload(
-                &metadata,
-                &input.content_base64,
-                input.content_mime_type.as_deref(),
-                None,
-            )? {
-                Some((content_type, body)) => {
-                    let mut planned = Request::new(
-                        Method::Patch,
-                        format!(
-                            "{root}/upload/drive/v3/files/{}?uploadType=multipart",
-                            encode(&input.file_id)
-                        ),
-                    );
-                    planned
-                        .headers
-                        .push(("content-type".to_string(), content_type));
-                    planned.body = body;
-                    planned
-                }
-                None => Request::new(Method::Patch, url).json(&metadata)?,
-            }
-        }
+        "createFile" => plan_create_file(root, &api, request)?,
+        "updateFile" => plan_update_file(root, &api, request)?,
         "copyFile" => {
             let input: CopyFile = request.json()?;
             let body = object(&[
@@ -266,11 +205,90 @@ fn answer(response: &Response) -> Result<ToolResponse, ConnectorError> {
     ToolResponse::structured(&body)
 }
 
+/// Plans `createFile`: metadata-only JSON, or a multipart upload when
+/// `contentBase64` is present.
+fn plan_create_file(
+    root: &str,
+    api: &str,
+    request: &ToolRequest,
+) -> Result<Request, ConnectorError> {
+    let input: CreateFile = request.json()?;
+    let metadata = object(&[
+        ("name", Some(json!(input.name))),
+        ("mimeType", input.mime_type.as_ref().map(|s| json!(s))),
+        ("parents", input.parents.as_ref().map(|p| json!(p))),
+        ("description", input.description.as_ref().map(|s| json!(s))),
+    ]);
+    match upload(
+        &metadata,
+        input.content_base64.as_ref(),
+        input.content_mime_type.as_deref(),
+        input.mime_type.as_deref(),
+    )? {
+        Some((content_type, body)) => Ok(upload_request(
+            Method::Post,
+            format!("{root}/upload/drive/v3/files?uploadType=multipart"),
+            content_type,
+            body,
+        )),
+        None => Ok(Request::post(api).json(&metadata)?),
+    }
+}
+
+/// Plans `updateFile`: metadata, parent moves and/or content replacement.
+fn plan_update_file(
+    root: &str,
+    api: &str,
+    request: &ToolRequest,
+) -> Result<Request, ConnectorError> {
+    let input: UpdateFile = request.json()?;
+    let metadata = object(&[
+        ("name", input.name.as_ref().map(|s| json!(s))),
+        ("description", input.description.as_ref().map(|s| json!(s))),
+        ("trashed", input.trashed.map(|b| json!(b))),
+    ]);
+    let url = with_query(
+        &format!("{api}/{}", encode(&input.file_id)),
+        &[
+            ("addParents", input.add_parents.map(|p| p.join(","))),
+            ("removeParents", input.remove_parents.map(|p| p.join(","))),
+        ],
+    );
+    match upload(
+        &metadata,
+        input.content_base64.as_ref(),
+        input.content_mime_type.as_deref(),
+        None,
+    )? {
+        Some((content_type, body)) => Ok(upload_request(
+            Method::Patch,
+            format!(
+                "{root}/upload/drive/v3/files/{}?uploadType=multipart",
+                encode(&input.file_id)
+            ),
+            content_type,
+            body,
+        )),
+        None => Ok(Request::new(Method::Patch, url).json(&metadata)?),
+    }
+}
+
+/// A request carrying a `multipart/related` body: the content-type header and
+/// the raw body are set directly instead of going through `.json()`.
+fn upload_request(method: Method, url: String, content_type: String, body: Vec<u8>) -> Request {
+    let mut planned = Request::new(method, url);
+    planned
+        .headers
+        .push(("content-type".to_string(), content_type));
+    planned.body = body;
+    planned
+}
+
 /// If `content_base64` is present, the decoded content plus its multipart
 /// content-type and body: the file `metadata` as JSON followed by the content.
 fn upload(
     metadata: &Value,
-    content_base64: &Option<String>,
+    content_base64: Option<&String>,
     content_mime_type: Option<&str>,
     default_mime_type: Option<&str>,
 ) -> Result<Option<(String, Vec<u8>)>, ConnectorError> {
@@ -322,7 +340,7 @@ fn with_query(url: &str, query: &[(&str, Option<String>)]) -> String {
 
 /// Builds a JSON object from the fields that are present.
 fn object(fields: &[(&str, Option<Value>)]) -> Value {
-    let mut map = serde_json::Map::new();
+    let mut map = serde_json::Map::with_capacity(fields.len());
     for (name, value) in fields {
         if let Some(value) = value {
             map.insert((*name).to_string(), value.clone());
@@ -351,7 +369,6 @@ mod tests {
         ToolRequest {
             tool: tool.into(),
             body: body.into(),
-            ..ToolRequest::default()
         }
     }
 

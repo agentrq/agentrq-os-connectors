@@ -13,6 +13,9 @@ connectors_sdk::manifest!("manifest.json");
 /// Where the API is unless the `api_base` input says otherwise.
 pub const DEFAULT_API_BASE: &str = "https://sheets.googleapis.com";
 
+/// How values are interpreted when the caller does not say.
+const DEFAULT_VALUE_INPUT_OPTION: &str = "USER_ENTERED";
+
 /// The connector.
 #[derive(Debug)]
 pub struct Gsheets;
@@ -87,29 +90,24 @@ fn outgoing(base: &str, request: &ToolRequest) -> Result<Request, ConnectorError
     let outgoing = match request.tool.as_str() {
         "getValues" => {
             let input: GetValues = request.json()?;
-            let mut url = format!(
-                "{}/{}/values/{}",
-                api,
-                encode(&input.spreadsheet_id),
-                encode(&input.range)
-            );
-            let mut query = Vec::new();
-            if let Some(option) = input.value_render_option {
-                query.push(format!("valueRenderOption={}", encode(&option)));
-            }
-            if let Some(dimension) = input.major_dimension {
-                query.push(format!("majorDimension={}", encode(&dimension)));
-            }
-            if !query.is_empty() {
-                url = format!("{}?{}", url, query.join("&"));
-            }
-            Request::get(url)
+            Request::get(with_query(
+                &format!(
+                    "{}/{}/values/{}",
+                    api,
+                    encode(&input.spreadsheet_id),
+                    encode(&input.range)
+                ),
+                &[
+                    ("valueRenderOption", input.value_render_option),
+                    ("majorDimension", input.major_dimension),
+                ],
+            ))
         }
         "updateValues" => {
             let input: UpdateValues = request.json()?;
             let value_input_option = input
                 .value_input_option
-                .unwrap_or_else(|| "USER_ENTERED".to_string());
+                .unwrap_or_else(|| DEFAULT_VALUE_INPUT_OPTION.to_string());
             let url = format!(
                 "{}/{}/values/{}?valueInputOption={}",
                 api,
@@ -123,17 +121,19 @@ fn outgoing(base: &str, request: &ToolRequest) -> Result<Request, ConnectorError
             let input: AppendValues = request.json()?;
             let value_input_option = input
                 .value_input_option
-                .unwrap_or_else(|| "USER_ENTERED".to_string());
-            let mut url = format!(
-                "{}/{}/values/{}:append?valueInputOption={}",
-                api,
-                encode(&input.spreadsheet_id),
-                encode(&input.range),
-                encode(&value_input_option)
+                .unwrap_or_else(|| DEFAULT_VALUE_INPUT_OPTION.to_string());
+            let url = with_query(
+                &format!(
+                    "{}/{}/values/{}:append",
+                    api,
+                    encode(&input.spreadsheet_id),
+                    encode(&input.range)
+                ),
+                &[
+                    ("valueInputOption", Some(value_input_option)),
+                    ("insertDataOption", input.insert_data_option),
+                ],
             );
-            if let Some(option) = input.insert_data_option {
-                url = format!("{}&insertDataOption={}", url, encode(&option));
-            }
             Request::post(url).json(&json!({ "values": input.values }))?
         }
         "clearValues" => {
@@ -152,18 +152,19 @@ fn outgoing(base: &str, request: &ToolRequest) -> Result<Request, ConnectorError
         }
         "getSpreadsheet" => {
             let input: GetSpreadsheet = request.json()?;
-            let mut url = format!("{}/{}", api, encode(&input.spreadsheet_id));
-            let mut query = Vec::new();
-            for range in input.ranges.unwrap_or_default() {
-                query.push(format!("ranges={}", encode(&range)));
-            }
+            let mut params: Vec<(&str, Option<String>)> = input
+                .ranges
+                .unwrap_or_default()
+                .into_iter()
+                .map(|range| ("ranges", Some(range)))
+                .collect();
             if let Some(include) = input.include_grid_data {
-                query.push(format!("includeGridData={include}"));
+                params.push(("includeGridData", Some(include.to_string())));
             }
-            if !query.is_empty() {
-                url = format!("{}?{}", url, query.join("&"));
-            }
-            Request::get(url)
+            Request::get(with_query(
+                &format!("{}/{}", api, encode(&input.spreadsheet_id)),
+                &params,
+            ))
         }
         "batchUpdate" => {
             let input: BatchUpdate = request.json()?;
@@ -190,6 +191,23 @@ fn answer(response: &Response) -> Result<ToolResponse, ConnectorError> {
     ToolResponse::structured(&body)
 }
 
+/// Appends the present query parameters to `url`, percent-encoding each value.
+fn with_query(url: &str, params: &[(&str, Option<String>)]) -> String {
+    let query: Vec<String> = params
+        .iter()
+        .filter_map(|(name, value)| {
+            value
+                .as_deref()
+                .map(|value| format!("{name}={}", encode(value)))
+        })
+        .collect();
+    if query.is_empty() {
+        url.to_string()
+    } else {
+        format!("{url}?{}", query.join("&"))
+    }
+}
+
 /// Percent-encodes a path segment or query value.
 fn encode(text: &str) -> String {
     text.bytes()
@@ -210,7 +228,6 @@ mod tests {
         ToolRequest {
             tool: tool.into(),
             body: body.into(),
-            ..ToolRequest::default()
         }
     }
 
