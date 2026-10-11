@@ -7,7 +7,8 @@
  *
  * Every rule here exists to match one in `crates/domain/src/catalog/` of
  * `agentrq/connectors`, except the listing bar — `icons` and `instructions`
- * are required to be listed, which is this catalogue's own rule, stricter than
+ * are required to be listed, and an index must order its connectors
+ * alphanumerically — which is this catalogue's own rule, stricter than
  * the server on purpose. The error/warning split is the module's point and is
  * asserted directly: a check being a warning and not an error is the thing that
  * keeps a nightly job from declaring a connector broken on behalf of an install
@@ -101,9 +102,25 @@ test('a repository with one connector needs no index', () => {
 })
 
 test('an index lists the manifests, in the order it gives them', () => {
-  const parsed = parseIndex(index({ connectors: [{ manifest: 'gmail/manifest.json' }, { manifest: 'drive/manifest.json' }] }))
-  assert.deepEqual(parsed.index.manifests, ['gmail/manifest.json', 'drive/manifest.json'])
+  const parsed = parseIndex(index({ connectors: [{ manifest: 'drive/manifest.json' }, { manifest: 'gmail/manifest.json' }] }))
+  assert.deepEqual(parsed.index.manifests, ['drive/manifest.json', 'gmail/manifest.json'])
   assert.deepEqual(parsed.warnings, [])
+})
+
+test('an index must list its connectors in alphanumeric order', () => {
+  const sorted = parseIndex(index({ connectors: [{ manifest: 'drive/manifest.json' }, { manifest: 'gmail/manifest.json' }] }))
+  assert.equal(sorted.ok, true)
+
+  const reversed = parseIndex(index({ connectors: [{ manifest: 'gmail/manifest.json' }, { manifest: 'drive/manifest.json' }] }))
+  assert.match(reversed.reason, /"drive\/manifest.json" is listed after "gmail\/manifest.json"/)
+  assert.match(reversed.reason, /alphanumeric order/)
+
+  // Ordering is by manifest path, code-point by code-point: the '-' in
+  // "github-pat" sorts before the '/' in "github/", so "github-pat" first.
+  const prefixed = parseIndex(index({ connectors: [{ manifest: 'github-pat/manifest.json' }, { manifest: 'github/manifest.json' }] }))
+  assert.equal(prefixed.ok, true)
+  const unprefixed = parseIndex(index({ connectors: [{ manifest: 'github/manifest.json' }, { manifest: 'github-pat/manifest.json' }] }))
+  assert.match(unprefixed.reason, /alphanumeric order/)
 })
 
 test('an index must be version 1, and list at least one connector', () => {

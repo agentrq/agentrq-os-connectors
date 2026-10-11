@@ -137,6 +137,15 @@ is excluded, with the reason naming the manifest and the missing field. The
 `instructions` key is part of the manifest schema, so a manifest carrying it
 still installs.
 
+### Alphanumeric order
+
+A `connectors-manifest.json` must list its connectors in alphanumeric order by
+manifest path, compared code-point by code-point. The index is the order the
+catalogue reads — and publishes — the connectors in, so it is the presentation
+order for the repository; keeping it sorted keeps that order readable and
+diffable. An index that is not sorted is excluded, with the reason naming the
+two entries out of place.
+
 ### Errors and warnings
 
 The server reads these same documents at install time, on one person's machine,
@@ -151,9 +160,11 @@ what the split enforces:
 - An **error** excludes the row. Most are things the server would refuse too: a
   document that is not JSON, a `manifestVersion` that is not 1, a name that is not
   a connector id, a path that leaves the repository, a release with no `.wasm`.
-  Two are the catalogue's own bar: a manifest with no `icons`, or no
-  `instructions`. The server installs whatever it can, but the catalogue lists
-  only a connector that shows an icon and tells the model how to use it.
+  Three are the catalogue's own bar: a manifest with no `icons`, or no
+  `instructions`, or an index that does not list its connectors in alphanumeric
+  order. The server installs whatever it can, but the catalogue lists
+  only a connector that shows an icon, tells the model how to use it, and sits
+  in an order a reader can scan.
 - A **warning** is published beside the row and costs it points: a key the server
   does not know (today's server refuses it — a newer one may not), a connector
   with no description, a release asset with no digest for an install to

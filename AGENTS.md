@@ -30,7 +30,9 @@ durable: add an entry only when it's worth a future session knowing.
   array and a non-empty `instructions` string (guidance for the model using
   the connector). The catalogue does not list a connector without them —
   enforced by `scripts/manifest.mjs`, the `agentrq-os-connectors-template`
-  linter, and the nightly build.
+  linter, and the nightly build. `connectors-manifest.json` must list
+  connectors in alphanumeric order by manifest path (code-point comparison, so
+  `github-pat/…` sorts before `github/…`) — same enforcement.
 - The connector `manifest.json` files have mixed formatting (some pretty-printed
   2-space, some compact single-line). When editing one, preserve its existing
   format — insert keys as text rather than re-serializing the whole file.

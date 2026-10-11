@@ -2,40 +2,40 @@
   "$schema": "https://connectors.agentrq.com/schemas/connectors-manifest/v1.json",
   "connectors": [
     {
-      "manifest": "gsheets/manifest.json"
+      "manifest": "gcal/manifest.json"
     },
     {
       "manifest": "gdocs/manifest.json"
     },
     {
-      "manifest": "gcal/manifest.json"
-    },
-    {
-      "manifest": "github/manifest.json"
-    },
-    {
-      "manifest": "github-pat/manifest.json"
-    },
-    {
-      "manifest": "gitlab/manifest.json"
-    },
-    {
-      "manifest": "gitlab-pat/manifest.json"
-    },
-    {
       "manifest": "gdrive/manifest.json"
-    },
-    {
-      "manifest": "gmail/manifest.json"
-    },
-    {
-      "manifest": "gtasks/manifest.json"
     },
     {
       "manifest": "gforms/manifest.json"
     },
     {
+      "manifest": "github-pat/manifest.json"
+    },
+    {
+      "manifest": "github/manifest.json"
+    },
+    {
+      "manifest": "gitlab-pat/manifest.json"
+    },
+    {
+      "manifest": "gitlab/manifest.json"
+    },
+    {
+      "manifest": "gmail/manifest.json"
+    },
+    {
+      "manifest": "gsheets/manifest.json"
+    },
+    {
       "manifest": "gslides/manifest.json"
+    },
+    {
+      "manifest": "gtasks/manifest.json"
     }
   ],
   "manifestVersion": 1
