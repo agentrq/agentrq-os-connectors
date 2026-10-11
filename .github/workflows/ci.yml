@@ -1,0 +1,54 @@
+name: CI
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+
+jobs:
+  test:
+    name: test (${{ matrix.connector }})
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: true
+      matrix:
+        connector: [gsheets, gdocs, gcal]
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: llvm-tools-preview
+
+      - uses: taiki-e/install-action@v2
+        with:
+          tool: cargo-llvm-cov
+
+      - name: Formatting
+        working-directory: ${{ matrix.connector }}
+        run: cargo fmt --all -- --check
+
+      - name: Tests with 100% coverage gate
+        working-directory: ${{ matrix.connector }}
+        # Lines and functions at 100%. Regions are not gated: the remaining
+        # uncovered regions are error paths on infallible operations
+        # (e.g. serializing a serde_json::Value), which cannot be triggered.
+        run: cargo llvm-cov --fail-under-lines 100 --fail-under-functions 100
+
+  shim-test:
+    name: test (sdk/connectors-sdk)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: dtolnay/rust-toolchain@stable
+
+      - name: Formatting
+        working-directory: sdk/connectors-sdk
+        run: cargo fmt --all -- --check
+
+      # The shim is test infrastructure for the connectors above; its error
+      # closures wrap infallible operations, so it is tested but not gated.
+      - name: Tests
+        working-directory: sdk/connectors-sdk
+        run: cargo test

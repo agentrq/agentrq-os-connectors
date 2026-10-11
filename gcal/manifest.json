@@ -1,0 +1,244 @@
+{
+  "$schema": "https://connectors.agentrq.com/schemas/manifest/v1.json",
+  "auth": {
+    "required": true,
+    "schemes": [
+      {
+        "authorizationUrl": "https://accounts.google.com/o/oauth2/v2/auth",
+        "clientSecretRequired": true,
+        "extraAuthParams": {
+          "access_type": "offline",
+          "prompt": "select_account consent"
+        },
+        "grants": [
+          "authorization_code"
+        ],
+        "pkce": true,
+        "scopes": [
+          "https://www.googleapis.com/auth/calendar"
+        ],
+        "tokenUrl": "https://oauth2.googleapis.com/token",
+        "type": "oauth2"
+      }
+    ]
+  },
+  "description": "Read, create, update and delete Google Calendar events: list agendas, fetch event details, and make scheduling changes.",
+  "icons": [
+    {
+      "src": "icon.svg",
+      "sizes": "any",
+      "type": "image/svg+xml"
+    }
+  ],
+  "inputs": [
+    {
+      "default": "https://www.googleapis.com",
+      "description": "Where the API is; it must be allowed below",
+      "name": "api_base",
+      "title": "API base URL",
+      "type": "string"
+    }
+  ],
+  "limits": {
+    "timeoutMs": 20000
+  },
+  "manifestVersion": 1,
+  "mcpVersion": "2026-07-28",
+  "name": "gcal",
+  "permissions": {
+    "http": {
+      "allow": [
+        "https://www.googleapis.com"
+      ]
+    }
+  },
+  "title": "Google Calendar",
+  "tools": [
+    {
+      "annotations": {
+        "idempotentHint": true,
+        "openWorldHint": true,
+        "readOnlyHint": true
+      },
+      "description": "List events in a calendar, optionally within a time window or matching a search query",
+      "inputSchema": {
+        "additionalProperties": false,
+        "properties": {
+          "calendarId": {
+            "default": "primary",
+            "description": "Calendar ID, e.g. \"primary\" or an email address",
+            "type": "string"
+          },
+          "maxResults": {
+            "description": "Maximum events to return",
+            "type": "integer"
+          },
+          "orderBy": {
+            "description": "Sort order: \"startTime\" (requires singleEvents) or \"updated\"",
+            "type": "string"
+          },
+          "q": {
+            "description": "Free-text search across summary, description, location and attendees",
+            "type": "string"
+          },
+          "singleEvents": {
+            "description": "Expand recurring events into instances",
+            "type": "boolean"
+          },
+          "timeMax": {
+            "description": "End of the window, RFC3339, e.g. 2026-10-18T00:00:00-07:00",
+            "type": "string"
+          },
+          "timeMin": {
+            "description": "Start of the window, RFC3339, e.g. 2026-10-11T00:00:00-07:00",
+            "type": "string"
+          }
+        },
+        "required": [
+          "calendarId"
+        ],
+        "type": "object"
+      },
+      "name": "listEvents",
+      "title": "List events"
+    },
+    {
+      "annotations": {
+        "idempotentHint": true,
+        "openWorldHint": true,
+        "readOnlyHint": true
+      },
+      "description": "Get one event's full details: times, attendees, location, description",
+      "inputSchema": {
+        "additionalProperties": false,
+        "properties": {
+          "calendarId": {
+            "default": "primary",
+            "description": "Calendar ID",
+            "type": "string"
+          },
+          "eventId": {
+            "description": "The event's ID",
+            "type": "string"
+          }
+        },
+        "required": [
+          "calendarId",
+          "eventId"
+        ],
+        "type": "object"
+      },
+      "name": "getEvent",
+      "title": "Get an event"
+    },
+    {
+      "annotations": {
+        "destructiveHint": false,
+        "openWorldHint": true,
+        "readOnlyHint": false
+      },
+      "description": "Create an event: summary, start and end (dateTime with offset or date for all-day), attendees, location, description",
+      "inputSchema": {
+        "additionalProperties": false,
+        "properties": {
+          "calendarId": {
+            "default": "primary",
+            "description": "Calendar ID",
+            "type": "string"
+          },
+          "event": {
+            "description": "Event resource, e.g. {\"summary\":\"Focus\",\"start\":{\"dateTime\":\"2026-10-12T14:00:00-07:00\"},\"end\":{\"dateTime\":\"2026-10-12T15:00:00-07:00\"}}",
+            "type": "object"
+          },
+          "sendUpdates": {
+            "default": "all",
+            "description": "Notify guests: all, externalOnly or none",
+            "type": "string"
+          }
+        },
+        "required": [
+          "calendarId",
+          "event"
+        ],
+        "type": "object"
+      },
+      "name": "createEvent",
+      "title": "Create an event"
+    },
+    {
+      "annotations": {
+        "destructiveHint": true,
+        "openWorldHint": true,
+        "readOnlyHint": false
+      },
+      "description": "Update an event; only the given fields change (patch semantics)",
+      "inputSchema": {
+        "additionalProperties": false,
+        "properties": {
+          "calendarId": {
+            "default": "primary",
+            "description": "Calendar ID",
+            "type": "string"
+          },
+          "event": {
+            "description": "Fields to change, e.g. {\"location\":\"Room A\"}",
+            "type": "object"
+          },
+          "eventId": {
+            "description": "The event's ID",
+            "type": "string"
+          },
+          "sendUpdates": {
+            "default": "all",
+            "description": "Notify guests: all, externalOnly or none",
+            "type": "string"
+          }
+        },
+        "required": [
+          "calendarId",
+          "eventId",
+          "event"
+        ],
+        "type": "object"
+      },
+      "name": "updateEvent",
+      "title": "Update an event"
+    },
+    {
+      "annotations": {
+        "destructiveHint": true,
+        "openWorldHint": true,
+        "readOnlyHint": false
+      },
+      "description": "Delete an event from the calendar",
+      "inputSchema": {
+        "additionalProperties": false,
+        "properties": {
+          "calendarId": {
+            "default": "primary",
+            "description": "Calendar ID",
+            "type": "string"
+          },
+          "eventId": {
+            "description": "The event's ID",
+            "type": "string"
+          },
+          "sendUpdates": {
+            "default": "all",
+            "description": "Notify guests: all, externalOnly or none",
+            "type": "string"
+          }
+        },
+        "required": [
+          "calendarId",
+          "eventId"
+        ],
+        "type": "object"
+      },
+      "name": "deleteEvent",
+      "title": "Delete an event"
+    }
+  ],
+  "version": "0.1.0",
+  "websiteUrl": "https://developers.google.com/workspace/calendar/api"
+}

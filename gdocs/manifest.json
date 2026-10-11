@@ -1,0 +1,150 @@
+{
+  "$schema": "https://connectors.agentrq.com/schemas/manifest/v1.json",
+  "auth": {
+    "required": true,
+    "schemes": [
+      {
+        "authorizationUrl": "https://accounts.google.com/o/oauth2/v2/auth",
+        "clientSecretRequired": true,
+        "extraAuthParams": {
+          "access_type": "offline",
+          "prompt": "select_account consent"
+        },
+        "grants": [
+          "authorization_code"
+        ],
+        "pkce": true,
+        "scopes": [
+          "https://www.googleapis.com/auth/documents"
+        ],
+        "tokenUrl": "https://oauth2.googleapis.com/token",
+        "type": "oauth2"
+      }
+    ]
+  },
+  "description": "Read, create and edit Google Docs: fetch a document's content, create new documents, and apply batch edits.",
+  "icons": [
+    {
+      "src": "icon.svg",
+      "sizes": "any",
+      "type": "image/svg+xml"
+    }
+  ],
+  "inputs": [
+    {
+      "default": "https://docs.googleapis.com",
+      "description": "Where the API is; it must be allowed below",
+      "name": "api_base",
+      "title": "API base URL",
+      "type": "string"
+    }
+  ],
+  "limits": {
+    "timeoutMs": 20000
+  },
+  "manifestVersion": 1,
+  "mcpVersion": "2026-07-28",
+  "name": "gdocs",
+  "permissions": {
+    "http": {
+      "allow": [
+        "https://docs.googleapis.com"
+      ]
+    }
+  },
+  "title": "Google Docs",
+  "tools": [
+    {
+      "annotations": {
+        "idempotentHint": true,
+        "openWorldHint": true,
+        "readOnlyHint": true
+      },
+      "description": "Get a document's content: title, body structure, tabs and formatting",
+      "inputSchema": {
+        "additionalProperties": false,
+        "properties": {
+          "documentId": {
+            "description": "The document's ID",
+            "type": "string"
+          },
+          "includeTabsContent": {
+            "description": "Include tab content in the response",
+            "type": "boolean"
+          },
+          "suggestionsViewMode": {
+            "description": "How suggestions appear: DEFAULT_FOR_CURRENT_ACCESS, SUGGESTIONS_INLINE or PREVIEW_WITHOUT_SUGGESTIONS",
+            "type": "string"
+          }
+        },
+        "required": [
+          "documentId"
+        ],
+        "type": "object"
+      },
+      "name": "getDocument",
+      "title": "Read a document"
+    },
+    {
+      "annotations": {
+        "destructiveHint": false,
+        "openWorldHint": true,
+        "readOnlyHint": false
+      },
+      "description": "Create a new empty document with the given title",
+      "inputSchema": {
+        "additionalProperties": false,
+        "properties": {
+          "title": {
+            "description": "Title of the new document",
+            "minLength": 1,
+            "type": "string"
+          }
+        },
+        "required": [
+          "title"
+        ],
+        "type": "object"
+      },
+      "name": "createDocument",
+      "title": "Create a document"
+    },
+    {
+      "annotations": {
+        "destructiveHint": true,
+        "openWorldHint": true,
+        "readOnlyHint": false
+      },
+      "description": "Apply edits to a document: insert or delete text, replace text, update formatting and styles",
+      "inputSchema": {
+        "additionalProperties": false,
+        "properties": {
+          "documentId": {
+            "description": "The document's ID",
+            "type": "string"
+          },
+          "requests": {
+            "description": "Docs API request objects, e.g. insertText, deleteContentRange, replaceAllText, updateTextStyle",
+            "items": {
+              "type": "object"
+            },
+            "type": "array"
+          },
+          "writeControl": {
+            "description": "Optional write control, e.g. {\"requiredRevisionId\": \"...\"} to guard against concurrent edits",
+            "type": "object"
+          }
+        },
+        "required": [
+          "documentId",
+          "requests"
+        ],
+        "type": "object"
+      },
+      "name": "batchUpdate",
+      "title": "Edit a document"
+    }
+  ],
+  "version": "0.1.0",
+  "websiteUrl": "https://developers.google.com/workspace/docs/api"
+}

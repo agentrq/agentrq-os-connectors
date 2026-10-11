@@ -1,0 +1,298 @@
+{
+  "$schema": "https://connectors.agentrq.com/schemas/manifest/v1.json",
+  "auth": {
+    "required": true,
+    "schemes": [
+      {
+        "authorizationUrl": "https://accounts.google.com/o/oauth2/v2/auth",
+        "clientSecretRequired": true,
+        "extraAuthParams": {
+          "access_type": "offline",
+          "prompt": "select_account consent"
+        },
+        "grants": [
+          "authorization_code"
+        ],
+        "pkce": true,
+        "scopes": [
+          "https://www.googleapis.com/auth/spreadsheets"
+        ],
+        "tokenUrl": "https://oauth2.googleapis.com/token",
+        "type": "oauth2"
+      }
+    ]
+  },
+  "description": "Read, write and manage Google Sheets: read ranges, update cells, append rows, clear ranges, create spreadsheets, inspect structure, and batch updates.",
+  "icons": [
+    {
+      "src": "icon.svg",
+      "sizes": "any",
+      "type": "image/svg+xml"
+    }
+  ],
+  "inputs": [
+    {
+      "default": "https://sheets.googleapis.com",
+      "description": "Where the API is; it must be allowed below",
+      "name": "api_base",
+      "title": "API base URL",
+      "type": "string"
+    }
+  ],
+  "limits": {
+    "timeoutMs": 20000
+  },
+  "manifestVersion": 1,
+  "mcpVersion": "2026-07-28",
+  "name": "gsheets",
+  "permissions": {
+    "http": {
+      "allow": [
+        "https://sheets.googleapis.com"
+      ]
+    }
+  },
+  "title": "Google Sheets",
+  "tools": [
+    {
+      "annotations": {
+        "idempotentHint": true,
+        "openWorldHint": true,
+        "readOnlyHint": true
+      },
+      "description": "Read values from a range, e.g. Sheet1!A1:D10",
+      "inputSchema": {
+        "additionalProperties": false,
+        "properties": {
+          "majorDimension": {
+            "description": "ROWS or COLUMNS",
+            "type": "string"
+          },
+          "range": {
+            "description": "A1 notation of the range to read, e.g. Sheet1!A1:D10",
+            "type": "string"
+          },
+          "spreadsheetId": {
+            "description": "The spreadsheet's ID",
+            "type": "string"
+          },
+          "valueRenderOption": {
+            "description": "FORMATTED_VALUE, UNFORMATTED_VALUE or FORMULA",
+            "type": "string"
+          }
+        },
+        "required": [
+          "spreadsheetId",
+          "range"
+        ],
+        "type": "object"
+      },
+      "name": "getValues",
+      "title": "Read a range"
+    },
+    {
+      "annotations": {
+        "destructiveHint": false,
+        "idempotentHint": true,
+        "openWorldHint": true,
+        "readOnlyHint": false
+      },
+      "description": "Write values into a range in place",
+      "inputSchema": {
+        "additionalProperties": false,
+        "properties": {
+          "range": {
+            "description": "A1 notation of the range to write, e.g. Sheet1!A1:B2",
+            "type": "string"
+          },
+          "spreadsheetId": {
+            "description": "The spreadsheet's ID",
+            "type": "string"
+          },
+          "valueInputOption": {
+            "description": "USER_ENTERED (default) parses dates, currency and formulas; RAW stores values as-is",
+            "type": "string"
+          },
+          "values": {
+            "description": "Rows of values to write; each inner array is one row",
+            "items": {
+              "type": "array"
+            },
+            "type": "array"
+          }
+        },
+        "required": [
+          "spreadsheetId",
+          "range",
+          "values"
+        ],
+        "type": "object"
+      },
+      "name": "updateValues",
+      "title": "Write cells"
+    },
+    {
+      "annotations": {
+        "destructiveHint": false,
+        "openWorldHint": true,
+        "readOnlyHint": false
+      },
+      "description": "Append rows of values after the last row of a table",
+      "inputSchema": {
+        "additionalProperties": false,
+        "properties": {
+          "insertDataOption": {
+            "description": "INSERT_ROWS (default) shifts existing rows down; OVERWRITE overwrites",
+            "type": "string"
+          },
+          "range": {
+            "description": "A1 notation of the table range, e.g. Sheet1!A:D",
+            "type": "string"
+          },
+          "spreadsheetId": {
+            "description": "The spreadsheet's ID",
+            "type": "string"
+          },
+          "valueInputOption": {
+            "description": "USER_ENTERED (default) parses dates, currency and formulas; RAW stores values as-is",
+            "type": "string"
+          },
+          "values": {
+            "description": "Rows of values to append; each inner array is one row",
+            "items": {
+              "type": "array"
+            },
+            "type": "array"
+          }
+        },
+        "required": [
+          "spreadsheetId",
+          "range",
+          "values"
+        ],
+        "type": "object"
+      },
+      "name": "appendValues",
+      "title": "Append rows"
+    },
+    {
+      "annotations": {
+        "destructiveHint": true,
+        "openWorldHint": true,
+        "readOnlyHint": false
+      },
+      "description": "Clear all values from a range, keeping formatting",
+      "inputSchema": {
+        "additionalProperties": false,
+        "properties": {
+          "range": {
+            "description": "A1 notation of the range to clear, e.g. Sheet1!A1:D10",
+            "type": "string"
+          },
+          "spreadsheetId": {
+            "description": "The spreadsheet's ID",
+            "type": "string"
+          }
+        },
+        "required": [
+          "spreadsheetId",
+          "range"
+        ],
+        "type": "object"
+      },
+      "name": "clearValues",
+      "title": "Clear a range"
+    },
+    {
+      "annotations": {
+        "destructiveHint": false,
+        "openWorldHint": true,
+        "readOnlyHint": false
+      },
+      "description": "Create a new spreadsheet with the given title",
+      "inputSchema": {
+        "additionalProperties": false,
+        "properties": {
+          "title": {
+            "description": "Title of the new spreadsheet",
+            "minLength": 1,
+            "type": "string"
+          }
+        },
+        "required": [
+          "title"
+        ],
+        "type": "object"
+      },
+      "name": "createSpreadsheet",
+      "title": "Create a spreadsheet"
+    },
+    {
+      "annotations": {
+        "idempotentHint": true,
+        "openWorldHint": true,
+        "readOnlyHint": true
+      },
+      "description": "Get a spreadsheet's metadata: tabs, properties and optionally grid data",
+      "inputSchema": {
+        "additionalProperties": false,
+        "properties": {
+          "includeGridData": {
+            "description": "Include cell data and formatting",
+            "type": "boolean"
+          },
+          "ranges": {
+            "description": "Limit the response to these A1 ranges",
+            "items": {
+              "type": "string"
+            },
+            "type": "array"
+          },
+          "spreadsheetId": {
+            "description": "The spreadsheet's ID",
+            "type": "string"
+          }
+        },
+        "required": [
+          "spreadsheetId"
+        ],
+        "type": "object"
+      },
+      "name": "getSpreadsheet",
+      "title": "Inspect a spreadsheet"
+    },
+    {
+      "annotations": {
+        "destructiveHint": true,
+        "openWorldHint": true,
+        "readOnlyHint": false
+      },
+      "description": "Apply structural and formatting changes: add tabs, format cells, freeze rows, set column widths",
+      "inputSchema": {
+        "additionalProperties": false,
+        "properties": {
+          "requests": {
+            "description": "Sheets API request objects, e.g. addSheet, updateSheetProperties, repeatCell",
+            "items": {
+              "type": "object"
+            },
+            "type": "array"
+          },
+          "spreadsheetId": {
+            "description": "The spreadsheet's ID",
+            "type": "string"
+          }
+        },
+        "required": [
+          "spreadsheetId",
+          "requests"
+        ],
+        "type": "object"
+      },
+      "name": "batchUpdate",
+      "title": "Batch update"
+    }
+  ],
+  "version": "0.1.0",
+  "websiteUrl": "https://developers.google.com/workspace/sheets/api"
+}
