@@ -1,9 +1,9 @@
 # gdrive — Google Drive connector
 
 An [AgentRQ](https://agentrq.com) connector (MCP server compiled to a `wasm32-wasip2`
-component) for the Google Drive API v3. List and search files, read metadata,
-create files and folders, upload content, rename, move, trash and restore,
-copy, permanently delete, and share.
+component) for the Google Drive API v3. Search files, read file content and
+metadata, create files and folders, upload content, rename, move, trash and
+restore, copy, permanently delete, and share.
 
 ![icon](icon.svg)
 
@@ -11,15 +11,32 @@ copy, permanently delete, and share.
 
 | Tool | Maps to | What it does |
 |---|---|---|
-| `listFiles` | `files.list` | List or search files (`q`, `pageSize`, `orderBy`, ...) |
+| `searchFiles` | `files.list` | Search or list files (`q`, `pageSize`, `orderBy`, ...) |
+| `readFile` | `files.get` + `files.export` | Read a file's content: downloads regular files, exports Google Docs/Sheets/Slides |
 | `getFile` | `files.get` | Get a file's metadata by ID |
 | `createFile` | `files.create` | Create a file or folder; `mimeType: application/vnd.google-apps.folder` makes a folder |
 | `updateFile` | `files.update` | Rename, move (`addParents`/`removeParents`), trash/restore (`trashed`), replace content |
 | `copyFile` | `files.copy` | Copy a file |
 | `deleteFile` | `files.delete` | Permanently delete a file (answers `{"deleted": true}`; Drive returns 204) |
-| `createPermission` | `permissions.create` | Share a file with a user, group, domain, or anyone |
+| `shareFile` | `permissions.create` | Share a file with a user, group, domain, or anyone |
 
 Inputs mirror the Drive API v3 parameter names (`fileId`, `pageSize`, `q`, ...).
+
+`readFile` fetches the file's metadata first, then downloads regular files
+directly (`files.get?alt=media`) or exports Google-native files (Docs, Sheets,
+Slides) to `exportMimeType` (default `text/plain`). It answers
+`{fileId, name, mimeType, size, contentBase64, exportedAs?}`, where
+`exportedAs` is present only when the content was exported.
+
+## What changed in 0.2.0
+
+- **New: `readFile`** — the connector can now read a file's bytes, the biggest
+  gap in the old surface. One call does the whole job: metadata fetch, then
+  download or export.
+- **Renamed: `listFiles` → `searchFiles`** — same parameters and behavior; the
+  new name says what the agent accomplishes instead of echoing the API.
+- **Renamed: `createPermission` → `shareFile`** — same parameters and
+  behavior; the old name was Drive API jargon for granting a permission.
 
 Uploading content (`contentBase64` on `createFile` / `updateFile`) uses
 `uploadType=multipart`: the file metadata as JSON plus the base64-decoded
