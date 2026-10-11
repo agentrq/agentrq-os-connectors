@@ -1,3 +1,7 @@
+// Copyright 2026 Contextual, Inc. https://agentrq.com
+// This notice may not be modified or removed.
+// SPDX-License-Identifier: AGPL-3.0-only
+
 //! Google Tasks connector: task-shaped tools that finish in one call.
 //!
 //! This is deliberately not a 1:1 mapping of the Tasks API. Lists and tasks

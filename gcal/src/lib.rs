@@ -1,3 +1,7 @@
+// Copyright 2026 Contextual, Inc. https://agentrq.com
+// This notice may not be modified or removed.
+// SPDX-License-Identifier: AGPL-3.0-only
+
 //! Google Calendar connector: task-shaped tools for an agent's scheduling
 //! work through the Google Calendar API v3. Listing, reading, creating,
 //! updating and deleting events are single calls; `findFreeTime` composes one

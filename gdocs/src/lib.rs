@@ -1,3 +1,7 @@
+// Copyright 2026 Contextual, Inc. https://agentrq.com
+// This notice may not be modified or removed.
+// SPDX-License-Identifier: AGPL-3.0-only
+
 //! Google Docs connector: read, create and edit documents through the
 //! Google Docs API v1. The host runs the OAuth 2.0 sign-in, refreshes the
 //! token and adds `Authorization: Bearer …` after each request leaves the

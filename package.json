@@ -9,6 +9,7 @@
   },
   "scripts": {
     "build": "node scripts/build-index.mjs",
+    "check-license": "node scripts/check-license.mjs",
     "test": "node --test test/*.test.mjs",
     "coverage": "node --test --experimental-test-coverage test/*.test.mjs"
   }

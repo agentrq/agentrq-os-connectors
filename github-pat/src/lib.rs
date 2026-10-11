@@ -1,3 +1,7 @@
+// Copyright 2026 Contextual, Inc. https://agentrq.com
+// This notice may not be modified or removed.
+// SPDX-License-Identifier: AGPL-3.0-only
+
 //! GitHub connector (token auth): outcome-oriented tools for repositories,
 //! branches, commits, files, issues, pull requests and Actions through the
 //! GitHub REST API. Sign in by pasting a fine-grained personal access token;

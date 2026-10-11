@@ -1,3 +1,7 @@
+// Copyright 2026 Contextual, Inc. https://agentrq.com
+// This notice may not be modified or removed.
+// SPDX-License-Identifier: AGPL-3.0-only
+
 //! Google Sheets connector: task-shaped tools for the Sheets API v4, not a
 //! 1:1 endpoint mapping.
 //!

@@ -1,3 +1,7 @@
+// Copyright 2026 Contextual, Inc. https://agentrq.com
+// This notice may not be modified or removed.
+// SPDX-License-Identifier: AGPL-3.0-only
+
 //! GitLab connector (token auth): task-shaped tools over the GitLab REST
 //! API (v4). Instead of mirroring endpoints one to one, each tool completes
 //! an agent's job in one call: reading files as text, writing them without a

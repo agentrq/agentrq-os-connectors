@@ -1,3 +1,7 @@
+// Copyright 2026 Contextual, Inc. https://agentrq.com
+// This notice may not be modified or removed.
+// SPDX-License-Identifier: AGPL-3.0-only
+
 //! Gmail, redesigned around what agents actually do with mail.
 //!
 //! Instead of mirroring the Gmail API v1 endpoint-for-endpoint, this
