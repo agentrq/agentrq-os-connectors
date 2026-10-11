@@ -46,14 +46,16 @@ pub struct Gmail;
 
 impl Connector for Gmail {
     fn call_tool(request: ToolRequest) -> Result<ToolResponse, ConnectorError> {
-        Self::call_with(request, |req| req.send())
+        Self::call_with(request, |req| Ok(req.clone().send()?))
     }
 }
 
 impl Gmail {
     /// Dispatches a tool call, sending through `send`. Production passes
-    /// `|req| req.send()`; tests pass a stub, so the whole orchestration —
-    /// including everything after each send — is covered.
+    /// `|req| Ok(req.clone().send()?)` — the real SDK's `send` takes the
+    /// request by value and reports `HttpError`, which `?` converts; tests
+    /// pass a stub, so the whole orchestration — including everything after
+    /// each send — is covered.
     fn call_with(
         request: ToolRequest,
         send: impl FnMut(&Request) -> Result<Response, ConnectorError>,

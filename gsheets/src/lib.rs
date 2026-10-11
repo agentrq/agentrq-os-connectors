@@ -100,7 +100,7 @@ struct BatchUpdate {
 
 impl Connector for Gsheets {
     fn call_tool(request: ToolRequest) -> Result<ToolResponse, ConnectorError> {
-        Self::call_with(request, |request| request.send())
+        Self::call_with(request, |request| Ok(request.clone().send()?))
     }
 }
 
@@ -311,9 +311,9 @@ fn plan_values_update(
         api.values(spreadsheet_id, range),
         encode(&option)
     );
-    Request::new(Method::Put, url)
+    Ok(Request::new(Method::Put, url)
         .header("accept", "application/json")
-        .json(&json!({ "values": values }))
+        .json(&json!({ "values": values }))?)
 }
 
 /// Plans `appendValues`.
@@ -333,18 +333,18 @@ fn plan_append_values(api: &Api, request: &ToolRequest) -> Result<Request, Conne
             ("insertDataOption", input.insert_data_option),
         ],
     );
-    Request::post(url)
+    Ok(Request::post(url)
         .header("accept", "application/json")
-        .json(&json!({ "values": input.values }))
+        .json(&json!({ "values": input.values }))?)
 }
 
 /// Plans `clearValues`.
 fn plan_clear_values(api: &Api, request: &ToolRequest) -> Result<Request, ConnectorError> {
     let input: ClearValues = request.json()?;
     let url = format!("{}:clear", api.values(&input.spreadsheet_id, &input.range));
-    Request::post(url)
+    Ok(Request::post(url)
         .header("accept", "application/json")
-        .json(&json!({}))
+        .json(&json!({}))?)
 }
 
 /// Plans `createSpreadsheet`: the spreadsheet plus a sheet per requested
@@ -363,9 +363,9 @@ fn plan_create_spreadsheet(
     if !sheets.is_empty() {
         body["sheets"] = Value::Array(sheets);
     }
-    Request::post(&api.spreadsheets)
+    Ok(Request::post(&api.spreadsheets)
         .header("accept", "application/json")
-        .json(&body)
+        .json(&body)?)
 }
 
 /// Plans `getSpreadsheet`.
@@ -390,9 +390,9 @@ fn plan_get_spreadsheet(api: &Api, request: &ToolRequest) -> Result<Request, Con
 fn plan_batch_update(api: &Api, request: &ToolRequest) -> Result<Request, ConnectorError> {
     let input: BatchUpdate = request.json()?;
     let url = format!("{}:batchUpdate", api.spreadsheet(&input.spreadsheet_id));
-    Request::post(url)
+    Ok(Request::post(url)
         .header("accept", "application/json")
-        .json(&json!({ "requests": input.requests }))
+        .json(&json!({ "requests": input.requests }))?)
 }
 
 // ---------------------------------------------------------------------------

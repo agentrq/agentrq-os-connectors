@@ -84,7 +84,7 @@ struct FindFreeTime {
 
 impl Connector for Gcal {
     fn call_tool(request: ToolRequest) -> Result<ToolResponse, ConnectorError> {
-        Self::call_with(request, |request| request.send())
+        Self::call_with(request, |request| Ok(request.clone().send()?))
     }
 }
 
@@ -184,9 +184,9 @@ fn plan_create_event(api: &Api, request: &ToolRequest) -> Result<Request, Connec
         &api.events(&input.calendar_id),
         &[("sendUpdates", input.send_updates)],
     );
-    Request::post(url)
+    Ok(Request::post(url)
         .header("accept", "application/json")
-        .json(&input.event)
+        .json(&input.event)?)
 }
 
 /// Plans `updateEvent`.
@@ -196,9 +196,9 @@ fn plan_update_event(api: &Api, request: &ToolRequest) -> Result<Request, Connec
         &api.event(&input.calendar_id, &input.event_id),
         &[("sendUpdates", input.send_updates)],
     );
-    Request::new(Method::Patch, url)
+    Ok(Request::new(Method::Patch, url)
         .header("accept", "application/json")
-        .json(&input.event)
+        .json(&input.event)?)
 }
 
 /// Plans `deleteEvent`.
@@ -315,9 +315,9 @@ impl FreeTimeQuery {
             "timeMax": self.time_max,
             "items": self.calendars.iter().map(|id| json!({"id": id})).collect::<Vec<_>>(),
         });
-        Request::post(api.free_busy())
+        Ok(Request::post(api.free_busy())
             .header("accept", "application/json")
-            .json(&body)
+            .json(&body)?)
     }
 }
 

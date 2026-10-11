@@ -126,7 +126,7 @@ struct ShareFile {
 
 impl Connector for Gdrive {
     fn call_tool(request: ToolRequest) -> Result<ToolResponse, ConnectorError> {
-        Self::call_with(request, |request| request.send())
+        Self::call_with(request, |request| Ok(request.clone().send()?))
     }
 }
 
@@ -243,7 +243,7 @@ fn plan_read_metadata(api: &Api, input: &ReadFile) -> Result<Request, ConnectorE
 
 /// The metadata `readFile` decides the content fetch from.
 fn parse_read_metadata(response: &Response) -> Result<FileMetadata, ConnectorError> {
-    response.json()
+    Ok(response.json()?)
 }
 
 /// Plans `readFile`'s content fetch: `files.export` for Google-native files,
@@ -423,7 +423,7 @@ fn plan_copy_file(api: &Api, request: &ToolRequest) -> Result<Request, Connector
         ("parents", input.parents.as_ref().map(|p| json!(p))),
         ("description", input.description.as_ref().map(|s| json!(s))),
     ]);
-    Request::post(format!("{}/copy", api.file(&input.file_id))).json(&body)
+    Ok(Request::post(format!("{}/copy", api.file(&input.file_id))).json(&body)?)
 }
 
 /// Plans `deleteFile`.
@@ -454,7 +454,7 @@ fn plan_share_file(api: &Api, request: &ToolRequest) -> Result<Request, Connecto
             input.email_message.as_ref().map(|s| json!(s)),
         ),
     ]);
-    Request::post(url).json(&body)
+    Ok(Request::post(url).json(&body)?)
 }
 
 /// A request carrying a `multipart/related` body: the content-type header and
