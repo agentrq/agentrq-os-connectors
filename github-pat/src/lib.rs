@@ -292,7 +292,7 @@ struct WrittenFile {
 
 impl Connector for GithubPat {
     fn call_tool(request: ToolRequest) -> Result<ToolResponse, ConnectorError> {
-        Self::call_with(request, |request| request.send())
+        Self::call_with(request, &mut |request| request.send())
     }
 }
 
@@ -302,7 +302,7 @@ impl GithubPat {
     /// covered end to end without a network.
     fn call_with(
         request: ToolRequest,
-        mut send: impl FnMut(&Request) -> Result<Response, ConnectorError>,
+        send: &mut dyn FnMut(&Request) -> Result<Response, ConnectorError>,
     ) -> Result<ToolResponse, ConnectorError> {
         let base = host::config("api_base").unwrap_or_else(|| DEFAULT_API_BASE.into());
         let api = base.trim_end_matches('/');
@@ -355,7 +355,7 @@ fn github_headers(planned: &Request) -> Request {
 fn one_call<I>(
     api: &str,
     request: &ToolRequest,
-    send: &mut impl FnMut(&Request) -> Result<Response, ConnectorError>,
+    send: &mut dyn FnMut(&Request) -> Result<Response, ConnectorError>,
     plan: fn(&str, &I) -> Result<Request, ConnectorError>,
 ) -> Result<ToolResponse, ConnectorError>
 where
@@ -458,7 +458,7 @@ fn plan_contents_get(
 fn read_file(
     api: &str,
     request: &ToolRequest,
-    send: &mut impl FnMut(&Request) -> Result<Response, ConnectorError>,
+    send: &mut dyn FnMut(&Request) -> Result<Response, ConnectorError>,
 ) -> Result<ToolResponse, ConnectorError> {
     let input: ReadFile = request.json()?;
     let response = send(&plan_contents_get(
@@ -550,7 +550,7 @@ fn combine_read_file(
 fn list_directory(
     api: &str,
     request: &ToolRequest,
-    send: &mut impl FnMut(&Request) -> Result<Response, ConnectorError>,
+    send: &mut dyn FnMut(&Request) -> Result<Response, ConnectorError>,
 ) -> Result<ToolResponse, ConnectorError> {
     let input: ListDirectory = request.json()?;
     let response = send(&plan_contents_get(
@@ -608,7 +608,7 @@ fn parse_file_meta(response: &Response) -> Result<Option<FileMeta>, ConnectorErr
 fn write_file(
     api: &str,
     request: &ToolRequest,
-    send: &mut impl FnMut(&Request) -> Result<Response, ConnectorError>,
+    send: &mut dyn FnMut(&Request) -> Result<Response, ConnectorError>,
 ) -> Result<ToolResponse, ConnectorError> {
     let input: WriteFile = request.json()?;
     let current = send(&plan_contents_get(
@@ -680,7 +680,7 @@ fn combine_write_file(path: &str, written: &WrittenFile) -> Result<ToolResponse,
 fn delete_file(
     api: &str,
     request: &ToolRequest,
-    send: &mut impl FnMut(&Request) -> Result<Response, ConnectorError>,
+    send: &mut dyn FnMut(&Request) -> Result<Response, ConnectorError>,
 ) -> Result<ToolResponse, ConnectorError> {
     let input: DeleteFile = request.json()?;
     let current = send(&plan_contents_get(
@@ -775,7 +775,7 @@ fn plan_list_issues(api: &str, input: &ListIssues) -> Result<Request, ConnectorE
 fn get_issue(
     api: &str,
     request: &ToolRequest,
-    send: &mut impl FnMut(&Request) -> Result<Response, ConnectorError>,
+    send: &mut dyn FnMut(&Request) -> Result<Response, ConnectorError>,
 ) -> Result<ToolResponse, ConnectorError> {
     let input: IssueRef = request.json()?;
     let url = format!(
@@ -867,7 +867,7 @@ fn plan_list_pulls(api: &str, input: &ListPulls) -> Result<Request, ConnectorErr
 fn get_pull(
     api: &str,
     request: &ToolRequest,
-    send: &mut impl FnMut(&Request) -> Result<Response, ConnectorError>,
+    send: &mut dyn FnMut(&Request) -> Result<Response, ConnectorError>,
 ) -> Result<ToolResponse, ConnectorError> {
     let input: PullRef = request.json()?;
     let url = format!(
@@ -942,7 +942,7 @@ fn plan_merge_pull(api: &str, input: &MergePull) -> Result<Request, ConnectorErr
 fn propose_changes(
     api: &str,
     request: &ToolRequest,
-    send: &mut impl FnMut(&Request) -> Result<Response, ConnectorError>,
+    send: &mut dyn FnMut(&Request) -> Result<Response, ConnectorError>,
 ) -> Result<ToolResponse, ConnectorError> {
     let input: ProposeChanges = request.json()?;
     if input.files.is_empty() {
@@ -984,16 +984,21 @@ fn propose_changes(
         return Ok(error);
     }
 
-    let pull = send(&Request::post(format!("{repo}/pulls")).json(&object(&[
-        ("title", Some(json!(input.title))),
-        ("head", Some(json!(input.new_branch))),
-        ("base", Some(json!(input.base))),
-        ("body", input.body.as_ref().map(|body| json!(body))),
-    ]))?)?;
+    let pull = send(&plan_propose_pull(&repo, &input)?)?;
     if let Err(error) = step_ok(&pull, "opening the pull request") {
         return Ok(error);
     }
     combine_propose_changes(&pull.json()?)
+}
+
+/// Plans `proposeChanges`' pull request.
+fn plan_propose_pull(repo: &str, input: &ProposeChanges) -> Result<Request, ConnectorError> {
+    Request::post(format!("{repo}/pulls")).json(&object(&[
+        ("title", Some(json!(input.title))),
+        ("head", Some(json!(input.new_branch))),
+        ("base", Some(json!(input.base))),
+        ("body", input.body.as_ref().map(|body| json!(body))),
+    ]))
 }
 
 /// Plans `proposeChanges`' tree: one call carrying every file as a blob, on
@@ -1165,7 +1170,7 @@ mod tests {
     }
 
     fn call(tool: &str, body: &str, stub: &mut Stub) -> Result<ToolResponse, ConnectorError> {
-        GithubPat::call_with(request(tool, body), |request| stub.send(request))
+        GithubPat::call_with(request(tool, body), &mut |request| stub.send(request))
     }
 
     const API: &str = "https://api.github.com";
@@ -1520,6 +1525,53 @@ mod tests {
     }
 
     #[test]
+    fn list_directory_reports_malformed_entries() {
+        // Arrange: the API answers an array whose entry is not a directory entry.
+        let mut stub = Stub::of(&[ok_json(r#"[{"name":42}]"#)]);
+
+        // Act.
+        let failed = call(
+            "listDirectory",
+            r#"{"owner":"o","repo":"r","path":"docs"}"#,
+            &mut stub,
+        );
+
+        // Assert: the shape error surfaces as a connector error.
+        assert!(matches!(failed, Err(ConnectorError::Upstream(_))));
+    }
+
+    #[test]
+    fn read_file_reports_malformed_metadata() {
+        // Arrange: the API answers valid JSON that is not file metadata.
+        let mut stub = Stub::of(&[ok_json(r#"{"type":42}"#)]);
+
+        // Act.
+        let failed = call(
+            "readFile",
+            r#"{"owner":"o","repo":"r","path":"f"}"#,
+            &mut stub,
+        );
+
+        // Assert: the shape error surfaces as a connector error.
+        assert!(matches!(failed, Err(ConnectorError::Upstream(_))));
+    }
+
+    #[test]
+    fn stub_sender_reports_exhaustion() {
+        // Arrange: no responses queued.
+        let mut stub = Stub::of(&[]);
+
+        // Act.
+        let failed = call("listDirectory", r#"{"owner":"o","repo":"r"}"#, &mut stub);
+
+        // Assert: the stub names its own exhaustion.
+        assert!(
+            matches!(&failed, Err(ConnectorError::Upstream(m)) if m.contains("ran out of responses")),
+            "{failed:?}"
+        );
+    }
+
+    #[test]
     fn writes_new_file_without_a_prior_sha() {
         // Arrange: the file does not exist yet, then the create succeeds.
         let mut stub = Stub::of(&[
@@ -1761,7 +1813,7 @@ mod tests {
         .unwrap();
         call(
             "updateIssue",
-            r#"{"owner":"octocat","repo":"hello-world","issue_number":7,"state":"closed"}"#,
+            r#"{"owner":"octocat","repo":"hello-world","issue_number":7,"title":"Bug","body":"It broke","state":"closed","labels":["bug"],"assignees":["octocat"]}"#,
             &mut stub,
         )
         .unwrap();
@@ -1799,7 +1851,16 @@ mod tests {
             stub.seen[2].url,
             format!("{API}/repos/octocat/hello-world/issues/7")
         );
-        assert_eq!(body_json(&stub.seen[2]), json!({ "state": "closed" }));
+        assert_eq!(
+            body_json(&stub.seen[2]),
+            json!({
+                "title": "Bug",
+                "body": "It broke",
+                "state": "closed",
+                "labels": ["bug"],
+                "assignees": ["octocat"],
+            })
+        );
         assert_eq!(stub.seen[3].method, Method::Post);
         assert_eq!(
             stub.seen[3].url,
@@ -2198,12 +2259,89 @@ mod tests {
     }
 
     #[test]
+    fn propagates_sender_errors() {
+        // Arrange: the sender itself fails on the first call.
+        let mut failing = |_: &Request| Err(ConnectorError::Upstream("network down".into()));
+
+        // Act + assert: the connector error surfaces instead of a tool answer.
+        for (tool, body) in [
+            ("readFile", r#"{"owner":"o","repo":"r","path":"f"}"#),
+            ("listDirectory", r#"{"owner":"o","repo":"r","path":"d"}"#),
+            (
+                "writeFile",
+                r#"{"owner":"o","repo":"r","path":"f","branch":"main","content":"a2k=","message":"m"}"#,
+            ),
+            (
+                "deleteFile",
+                r#"{"owner":"o","repo":"r","path":"f","branch":"main"}"#,
+            ),
+            (
+                "proposeChanges",
+                r#"{"owner":"o","repo":"r","base":"main","new_branch":"f","files":[{"path":"a","content":"b"}],"title":"T"}"#,
+            ),
+        ] {
+            let failed = GithubPat::call_with(request(tool, body), &mut failing);
+            assert!(
+                matches!(failed, Err(ConnectorError::Upstream(_))),
+                "{tool}: {failed:?}"
+            );
+        }
+    }
+
+    #[test]
     fn off_wasm_nothing_is_sent() {
-        let sent = GithubPat::call_tool(request(
-            "getRepo",
-            r#"{"owner":"octocat","repo":"hello-world"}"#,
-        ));
-        assert!(matches!(&sent, Err(ConnectorError::Upstream(m)) if m.contains("wasm32-wasip2")));
+        // Every tool goes through the production sender here, covering the
+        // header-adding dispatch for each tool; off wasm the first send
+        // fails before anything leaves the guest.
+        let calls = [
+            ("getRepo", r#"{"owner":"o","repo":"r"}"#),
+            ("listRepos", r#"{}"#),
+            ("createRepo", r#"{"name":"r"}"#),
+            ("readFile", r#"{"owner":"o","repo":"r","path":"f"}"#),
+            ("listDirectory", r#"{"owner":"o","repo":"r"}"#),
+            (
+                "writeFile",
+                r#"{"owner":"o","repo":"r","path":"f","branch":"b","content":"a2k=","message":"m"}"#,
+            ),
+            (
+                "deleteFile",
+                r#"{"owner":"o","repo":"r","path":"f","branch":"b"}"#,
+            ),
+            ("listBranches", r#"{"owner":"o","repo":"r"}"#),
+            ("listCommits", r#"{"owner":"o","repo":"r"}"#),
+            ("getCommit", r#"{"owner":"o","repo":"r","ref":"main"}"#),
+            ("listIssues", r#"{"owner":"o","repo":"r"}"#),
+            ("getIssue", r#"{"owner":"o","repo":"r","issue_number":1}"#),
+            ("createIssue", r#"{"owner":"o","repo":"r","title":"t"}"#),
+            (
+                "updateIssue",
+                r#"{"owner":"o","repo":"r","issue_number":1}"#,
+            ),
+            (
+                "commentOnIssue",
+                r#"{"owner":"o","repo":"r","issue_number":1,"body":"b"}"#,
+            ),
+            ("listPulls", r#"{"owner":"o","repo":"r"}"#),
+            ("getPull", r#"{"owner":"o","repo":"r","pull_number":1}"#),
+            (
+                "createPull",
+                r#"{"owner":"o","repo":"r","title":"t","head":"a","base":"b"}"#,
+            ),
+            ("mergePull", r#"{"owner":"o","repo":"r","pull_number":1}"#),
+            (
+                "proposeChanges",
+                r#"{"owner":"o","repo":"r","base":"b","new_branch":"n","files":[{"path":"f","content":"c"}],"title":"t"}"#,
+            ),
+            ("getAuthenticatedUser", r#"{}"#),
+            ("listWorkflowRuns", r#"{"owner":"o","repo":"r"}"#),
+        ];
+        for (tool, body) in calls {
+            let sent = GithubPat::call_tool(request(tool, body));
+            assert!(
+                matches!(&sent, Err(ConnectorError::Upstream(m)) if m.contains("wasm32-wasip2")),
+                "{tool}: {sent:?}"
+            );
+        }
     }
 
     #[test]
