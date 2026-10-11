@@ -15,6 +15,9 @@
     },
     {
       "manifest": "github-pat/manifest.json"
+    },
+    {
+      "manifest": "gitlab/manifest.json"
     }
   ],
   "manifestVersion": 1
