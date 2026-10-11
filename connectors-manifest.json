@@ -36,6 +36,12 @@
     },
     {
       "manifest": "gtasks/manifest.json"
+    },
+    {
+      "manifest": "notion-pat/manifest.json"
+    },
+    {
+      "manifest": "notion/manifest.json"
     }
   ],
   "manifestVersion": 1
