@@ -12,6 +12,9 @@
     },
     {
       "manifest": "github/manifest.json"
+    },
+    {
+      "manifest": "github-pat/manifest.json"
     }
   ],
   "manifestVersion": 1
