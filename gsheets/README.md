@@ -1,22 +1,38 @@
 # gsheets — Google Sheets connector
 
 An [AgentRQ](https://agentrq.com) connector (MCP server compiled to a `wasm32-wasip2`
-component) for the Google Sheets API v4. Read ranges, write cells, append rows,
-clear ranges, create spreadsheets, inspect structure, and run batch updates.
+component) for the Google Sheets API v4. The tools are shaped around what an
+agent wants to accomplish — read a table, write cells, create a populated
+spreadsheet — rather than the API's endpoints, so most jobs finish in one
+call.
 
 ![icon](icon.svg)
 
 ## Tools
 
-| Tool | Maps to | What it does |
+| Tool | What it does |
+|---|---|
+| `getValues` | Read raw values from a range (`Sheet1!A1:B10`) |
+| `readTable` | Read a range as a table: first row becomes headers, the rest become objects |
+| `updateValues` | Write values to a range (`USER_ENTERED` by default) |
+| `appendValues` | Append rows to a table |
+| `clearValues` | Clear a range |
+| `createSpreadsheet` | Create a spreadsheet, optionally with named sheets and their initial rows |
+| `getSpreadsheet` | Inspect titles, sheets, grid properties |
+| `batchUpdate` | Structural batch requests (escape hatch for formatting/structure) |
+
+### What changed in 0.2.0
+
+| Before | After | Why |
 |---|---|---|
-| `getValues` | `spreadsheets.values.get` | Read a range (`Sheet1!A1:B10`) |
-| `updateValues` | `spreadsheets.values.update` | Write values to a range (`USER_ENTERED` by default) |
-| `appendValues` | `spreadsheets.values.append` | Append rows to a table |
-| `clearValues` | `spreadsheets.values.clear` | Clear a range |
-| `createSpreadsheet` | `spreadsheets.create` | Create a spreadsheet |
-| `getSpreadsheet` | `spreadsheets.get` | Inspect titles, sheets, grid properties |
-| `batchUpdate` | `spreadsheets.batchUpdate` | Structural batch requests |
+| `getValues` returned nested arrays | `readTable` added: `{headers, rows: [{col: value}], rowCount}` | Agents want tables, not `values[3][1]`; the raw read stays for index math |
+| `createSpreadsheet` made an empty spreadsheet (1+N calls to populate) | `createSpreadsheet` takes `sheets: [{title, rows}]` and writes each sheet's rows in the same call | Creating a populated spreadsheet used to need one call per sheet |
+| — | Everything else unchanged | `updateValues`, `appendValues`, `clearValues`, `getSpreadsheet`, `batchUpdate` were already task-shaped; the redesign only fills the two composed gaps |
+
+`readTable` reuses `getValues`' fetch (same parameters), so choosing between
+them is only about the shape of the answer. Sheets whose titles need quoting
+in A1 notation are quoted automatically when `createSpreadsheet` writes their
+rows.
 
 ## Auth
 

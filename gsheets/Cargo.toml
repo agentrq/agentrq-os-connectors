@@ -1,6 +1,6 @@
 [package]
 name = "gsheets"
-version = "0.1.0"
+version = "0.2.0"
 edition = "2024"
 publish = false
 
@@ -10,7 +10,10 @@ crate-type = ["cdylib"]
 [dependencies]
 connectors-sdk = { path = "../sdk/connectors-sdk" }
 serde = { version = "1", features = ["derive"] }
-serde_json = "1"
+# preserve_order keeps JSON objects in insertion order, so tool answers read
+# in the order the code builds them (headers before rows, row keys in header
+# order) instead of alphabetically.
+serde_json = { version = "1", features = ["preserve_order"] }
 
 [profile.release]
 opt-level = "s"
