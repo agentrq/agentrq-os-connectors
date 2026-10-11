@@ -33,6 +33,7 @@ concurrency:
 
 permissions:
   contents: write
+  pull-requests: write
 
 jobs:
   update:
@@ -60,11 +61,27 @@ jobs:
         run: |
           git config user.name 'github-actions[bot]'
           git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          # Main is covered by a ruleset that requires changes through a pull
+          # request, so the bot can no longer push to main directly. Open a
+          # branch PR and merge it straight away: the ruleset asks for no
+          # reviewers and no required checks, so the merge is immediate.
+          branch="chore/update-catalogue/${{ github.run_id }}"
+          # A run cancelled mid-way (a newer run cancels the older one) can
+          # leave a stale PR behind; close those first so they never pile up.
+          for stale in $(gh pr list --state open --json number,headRefName \
+              --jq '.[] | select(.headRefName | startswith("chore/update-catalogue/")) | .number'); do
+            gh pr close "$stale"
+          done
+          git checkout -b "$branch"
           git add connectors.json
           git commit -m 'chore: update the connector catalogue'
           # The schedule is daily and the job is cancelled by a newer run, so a
           # push that lost a race is a stale result, not one worth retrying.
-          git push
+          git push -u origin "$branch"
+          gh pr create --title 'chore: update the connector catalogue' \
+            --body 'Automated rebuild of the public connector catalogue.' \
+            --head "$branch" --base main
+          gh pr merge --merge --delete-branch "$branch"
 
       - name: Report
         run: |
