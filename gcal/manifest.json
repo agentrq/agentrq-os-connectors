@@ -25,9 +25,11 @@
   "description": "Read, create, update and delete Google Calendar events: list agendas, fetch event details, and make scheduling changes.",
   "icons": [
     {
-      "src": "icon.svg",
-      "sizes": "any",
-      "type": "image/svg+xml"
+      "src": "https://raw.githubusercontent.com/agentrq/agentrq-os-connectors/main/gcal/icon.svg",
+      "mimeType": "image/svg+xml",
+      "sizes": [
+        "any"
+      ]
     }
   ],
   "inputs": [

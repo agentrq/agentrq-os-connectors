@@ -25,9 +25,11 @@
   "description": "Read, create and edit Google Docs: fetch a document's content, create new documents, and apply batch edits.",
   "icons": [
     {
-      "src": "icon.svg",
-      "sizes": "any",
-      "type": "image/svg+xml"
+      "src": "https://raw.githubusercontent.com/agentrq/agentrq-os-connectors/main/gdocs/icon.svg",
+      "mimeType": "image/svg+xml",
+      "sizes": [
+        "any"
+      ]
     }
   ],
   "inputs": [

@@ -25,9 +25,11 @@
   "description": "Read, write and manage Google Sheets: read ranges, update cells, append rows, clear ranges, create spreadsheets, inspect structure, and batch updates.",
   "icons": [
     {
-      "src": "icon.svg",
-      "sizes": "any",
-      "type": "image/svg+xml"
+      "src": "https://raw.githubusercontent.com/agentrq/agentrq-os-connectors/main/gsheets/icon.svg",
+      "mimeType": "image/svg+xml",
+      "sizes": [
+        "any"
+      ]
     }
   ],
   "inputs": [
