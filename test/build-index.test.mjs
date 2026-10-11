@@ -91,6 +91,7 @@ function manifestFor(name = 'gmail', overrides = {}) {
     title: name,
     version: '0.1.0',
     description: `Does ${name} things.`,
+    instructions: `Use the ${name} tools to do ${name} things.`,
     icons: [{ src: 'data:image/svg+xml;base64,AAA', mimeType: 'image/svg+xml', sizes: ['any'] }],
     tools: [{ name: 'list' }],
     ...overrides,
@@ -518,9 +519,46 @@ test('toEntry keeps what it managed to read when the release is the problem', as
   assert.equal(result.connectors[0].name, 'gmail', 'so the author can see what was read of theirs')
 })
 
+test('toEntry excludes a connector with no icon or no instructions, naming the rule', async () => {
+  const noIcons = fakeGitHub({
+    files: { [fileAt('acme/gmail', MANIFEST_FILE)]: manifestFor('gmail', { icons: [] }) },
+    releases: { 'acme/gmail': releaseFor(['gmail']) },
+  })
+  const withoutIcons = await toEntry(repoOf(), noIcons)
+  assert.equal(withoutIcons.ok, false)
+  assert.match(withoutIcons.reason, /"icons" is required/)
+
+  const noInstructions = fakeGitHub({
+    files: { [fileAt('acme/gmail', MANIFEST_FILE)]: manifestFor('gmail', { instructions: '' }) },
+    releases: { 'acme/gmail': releaseFor(['gmail']) },
+  })
+  const withoutInstructions = await toEntry(repoOf(), noInstructions)
+  assert.equal(withoutInstructions.ok, false)
+  assert.match(withoutInstructions.reason, /"instructions" is required/)
+})
+
+test('toEntry reports every connector that fails the listing bar, not just the first', async () => {
+  const github = fakeGitHub({
+    files: {
+      [fileAt('acme/suite', INDEX_FILE)]: JSON.stringify({
+        manifestVersion: 1,
+        connectors: [{ manifest: 'a/manifest.json' }, { manifest: 'b/manifest.json' }],
+      }),
+      [fileAt('acme/suite', 'a/manifest.json')]: manifestFor('gmail', { icons: [] }),
+      [fileAt('acme/suite', 'b/manifest.json')]: manifestFor('drive', { instructions: '' }),
+    },
+    releases: { 'acme/suite': releaseFor(['gmail', 'drive']) },
+  })
+  const result = await toEntry(repoOf({ full_name: 'acme/suite', name: 'suite' }), github)
+
+  assert.equal(result.ok, false)
+  assert.match(result.reason, /a\/manifest\.json.*"icons" is required/)
+  assert.match(result.reason, /b\/manifest\.json.*"instructions" is required/)
+})
+
 test('toEntry gathers warnings from the documents and the repository', async () => {
   const github = fakeGitHub({
-    files: { [fileAt('acme/gmail', MANIFEST_FILE)]: manifestFor('gmail', { icons: [], extra: 1 }) },
+    files: { [fileAt('acme/gmail', MANIFEST_FILE)]: manifestFor('gmail', { extra: 1 }) },
     releases: { 'acme/gmail': releaseFor([], { assets: [{ name: 'gmail.wasm' }] }) },
   })
   const result = await toEntry(repoOf({ archived: true }), github)
@@ -528,7 +566,6 @@ test('toEntry gathers warnings from the documents and the repository', async () 
   const text = result.warnings.join('\n')
   assert.equal(result.ok, true)
   assert.match(text, /a key the server does not know/)
-  assert.match(text, /no "icons"/)
   assert.match(text, /no digest/)
   assert.match(text, /archived/)
 })

@@ -41,6 +41,7 @@
       "type": "string"
     }
   ],
+  "instructions": "Read the document with readDocument before editing so the structure you edit is current. Compose changes with editDocument, which applies typed edits in one batch; createDocument takes the initial content along. One call per outcome \u2014 never hand-roll multi-request sequences.",
   "limits": {
     "timeoutMs": 20000
   },

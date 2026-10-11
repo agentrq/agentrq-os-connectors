@@ -26,6 +26,14 @@ durable: add an entry only when it's worth a future session knowing.
 - 100% line and function coverage is mandatory for every connector
   (`cargo llvm-cov --fail-under-lines 100 --fail-under-functions 100`);
   `cargo fmt --all -- --check` must be clean.
+- Every published connector's `manifest.json` must carry a non-empty `icons`
+  array and a non-empty `instructions` string (guidance for the model using
+  the connector). The catalogue does not list a connector without them —
+  enforced by `scripts/manifest.mjs`, the `agentrq-os-connectors-template`
+  linter, and the nightly build.
+- The connector `manifest.json` files have mixed formatting (some pretty-printed
+  2-space, some compact single-line). When editing one, preserve its existing
+  format — insert keys as text rather than re-serializing the whole file.
 
 ## Learning resources
 - Rust: read https://github.com/leonardomso/rust-skills/blob/master/SKILL.md

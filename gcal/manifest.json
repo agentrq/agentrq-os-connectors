@@ -41,6 +41,7 @@
       "type": "string"
     }
   ],
+  "instructions": "Find events with listEvents before updating or deleting them; event IDs come from there. Times are RFC 3339 with timezone offsets. Use findFreeTime to propose open slots of a given length instead of scanning agendas by hand.",
   "limits": {
     "timeoutMs": 20000
   },

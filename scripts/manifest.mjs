@@ -21,12 +21,16 @@
  * them here, once a day, in public, is what turns a private install failure into
  * something its author can find.
  *
- * It follows that this must never be *stricter* than the server, and the
- * error/warning split is how that is kept honest:
+ * It follows that this is stricter than the server in exactly one place, and the
+ * error/warning split is how that stays honest:
  *
- * - An **error** is something the server would refuse too: a document that is
+ * - An **error** is something the catalogue will not list: a document that is
  *   not JSON, a `manifestVersion` that is not 1, a name that is not a connector
- *   id, a path that leaves the repository.
+ *   id, a path that leaves the repository — or a manifest with no `icons` or
+ *   no `instructions`. The first group the server would refuse too; the second
+ *   is the catalogue's own bar, and it is deliberate: the server installs
+ *   whatever it can, but the catalogue lists only a connector that shows an
+ *   icon and tells the model how to use it.
  * - A **warning** is everything that depends on a version or on judgement — an
  *   unknown key (today's server refuses it, a newer one may not), a connector
  *   with no description, a repository whose licence the catalogue does not
@@ -72,6 +76,7 @@ export const MANIFEST_KEYS = new Set([
   'title',
   'version',
   'description',
+  'instructions',
   'websiteUrl',
   'icons',
   'tools',
@@ -241,10 +246,23 @@ export function parseIndex(source) {
 }
 
 /**
+ * Whether an icon `src` is one the server accepts.
+ *
+ * `validation.rs` (`icon-src`): the scheme before the first `:` must be
+ * `https:` or `data:`.
+ */
+function isAllowedIconSrc(src) {
+  const scheme = src.split(':')[0].toLowerCase()
+  return scheme === 'https' || scheme === 'data'
+}
+
+/**
  * Reads one connector's `manifest.json`.
  *
- * Four fields are required because the server's `Manifest` makes them so;
- * everything else it carries — tools, auth, inputs, permissions, limits — is
+ * Four fields are required because the server's `Manifest` makes them so, and two
+ * more — `icons` and `instructions` — because the catalogue does: a row with no
+ * icon, or with nothing to tell the model using the connector, is not listed.
+ * Everything else it carries — tools, auth, inputs, permissions, limits — is
  * read for the listing but not judged here. Those are the fields that say what a
  * connector may *do*, and the screen that asks the user to agree to them is the
  * right place to check them, against the version of the host doing the asking.
@@ -279,6 +297,19 @@ export function parseManifest(source, { path = MANIFEST_FILE } = {}) {
     return fail(`${path}: "mcpVersion" is required — the MCP revision this was written against, such as "2026-07-28".`)
   }
 
+  const icons = Array.isArray(doc.icons) ? doc.icons : []
+  if (icons.length === 0) {
+    return fail(`${path}: "icons" is required — the catalogue lists a connector only with an icon to show for it.`)
+  }
+  if (icons.some((icon) => !isAllowedIconSrc(str(icon?.src)))) {
+    return fail(`${path}: every "icons" entry needs a "src" that is an https: URL or a data: URI.`)
+  }
+
+  const instructions = str(doc.instructions)
+  if (!instructions) {
+    return fail(`${path}: "instructions" is required — the catalogue lists a connector only with guidance for the model using it.`)
+  }
+
   const warnings = []
   const unknown = Object.keys(doc).filter((key) => !MANIFEST_KEYS.has(key))
   if (unknown.length > 0) {
@@ -295,9 +326,6 @@ export function parseManifest(source, { path = MANIFEST_FILE } = {}) {
   const description = str(doc.description)
   if (!description) {
     warnings.push(`${path} has no "description", so the catalogue has nothing to say about ${name}.`)
-  }
-  if (!Array.isArray(doc.icons) || doc.icons.length === 0) {
-    warnings.push(`${path} has no "icons", so ${name} shows without one.`)
   }
 
   const tools = Array.isArray(doc.tools) ? doc.tools : []
@@ -316,6 +344,7 @@ export function parseManifest(source, { path = MANIFEST_FILE } = {}) {
       version,
       mcpVersion,
       description,
+      instructions,
       websiteUrl: str(doc.websiteUrl),
       icons: Array.isArray(doc.icons) ? doc.icons.length : 0,
       tools: tools.map((tool) => str(tool?.name)).filter(Boolean),
