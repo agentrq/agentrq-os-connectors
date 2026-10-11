@@ -357,5 +357,6 @@
     }
   ],
   "version": "0.2.0",
-  "websiteUrl": "https://developers.google.com/workspace/sheets/api"
+  "websiteUrl": "https://developers.google.com/workspace/sheets/api",
+  "instructions": "Prefer readTable over getValues when the first row is a header — it returns {headers, rows} objects so the agent never indexes into nested arrays; getValues stays for raw ranges and index math. updateValues writes in place (USER_ENTERED by default), appendValues adds rows after the last row, and clearValues empties cells while keeping formatting. createSpreadsheet can take named sheets with their initial rows in the same call, and quotes sheet titles in A1 notation automatically. getSpreadsheet inspects tabs and grid properties; batchUpdate is the escape hatch for structural and formatting changes."
 }
