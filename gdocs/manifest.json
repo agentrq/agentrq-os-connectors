@@ -187,5 +187,6 @@
     }
   ],
   "version": "0.2.0",
-  "websiteUrl": "https://developers.google.com/workspace/docs/api"
+  "websiteUrl": "https://developers.google.com/workspace/docs/api",
+  "instructions": "readDocument returns a document as plain text (title plus paragraphs, lists as indented items, tables as tab-separated cells) — use it instead of digging through API structure. createDocument takes optional text to write in the same call. editDocument applies typed append/insert/replace/deleteRange edits in one batch; indices are UTF-16 code-unit offsets as the Docs API counts them, appends resolve the end position themselves and land in order, and an empty edits array is a no-op."
 }
