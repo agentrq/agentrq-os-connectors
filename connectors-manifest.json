@@ -30,6 +30,9 @@
     },
     {
       "manifest": "gtasks/manifest.json"
+    },
+    {
+      "manifest": "gforms/manifest.json"
     }
   ],
   "manifestVersion": 1
