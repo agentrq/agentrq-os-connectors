@@ -896,5 +896,6 @@
     }
   ],
   "version": "0.2.0",
-  "websiteUrl": "https://docs.gitlab.com/ee/api/"
+  "websiteUrl": "https://docs.gitlab.com/ee/api/",
+  "instructions": "project_id accepts a numeric ID or a namespace/project path (URL-encoded internally); issues and merge requests are addressed by their project-scoped iid. Prefer readFile (decoded text; binary files come back base64 with is_binary) and writeFile (creates or updates in one call with plain text) over raw file APIs. getIssue and getMergeRequest include notes in the same call. proposeChanges is the flagship composed tool: it creates a branch, commits every file in one multi-action commit, and opens the merge request — the title doubles as the commit message. Use listPipelines to check CI status; deleteFile answers {deleted: true}."
 }
