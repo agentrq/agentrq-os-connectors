@@ -19,11 +19,15 @@ on:
     branches: [main]
     # A change to how the index is built should produce the new index straight
     # away, instead of leaving main describing a file that will not match it
-    # until tomorrow.
+    # until tomorrow. The same goes for a change to what this repository
+    # publishes: a new or updated connector should reach the catalogue on its
+    # merge, not on the next scheduled run.
     paths:
       - 'scripts/build-index.mjs'
       - 'scripts/manifest.mjs'
       - '.github/workflows/update-connectors.yml'
+      - 'connectors-manifest.json'
+      - '*/manifest.json'
 
 # A scheduled run and a manual one can collide. The newer one has strictly fresher
 # data, so let it win rather than have two jobs race to commit the same file.
