@@ -26,3 +26,9 @@ durable: add an entry only when it's worth a future session knowing.
 - 100% line and function coverage is mandatory for every connector
   (`cargo llvm-cov --fail-under-lines 100 --fail-under-functions 100`);
   `cargo fmt --all -- --check` must be clean.
+
+## Learning resources
+- Rust: read https://github.com/leonardomso/rust-skills/blob/master/SKILL.md
+  before writing or refactoring Rust. It holds 265 rules across 26 categories
+  (ownership, error handling, API design, serde, testing, anti-patterns) —
+  learn from it instead of guessing.
