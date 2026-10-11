@@ -2,3 +2,6 @@
 .mcp.json
 
 node_modules/
+
+# Rust build output
+target/

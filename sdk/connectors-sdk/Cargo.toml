@@ -1,0 +1,12 @@
+[package]
+name = "connectors-sdk"
+version = "0.1.0"
+edition = "2021"
+publish = false
+description = "Host-side test double for the private AgentRQ connectors-sdk. It provides the same API surface the connectors use so `cargo test` runs in CI. The real SDK (on the AgentRQ host) additionally validates the manifest at compile time and performs real HTTP in `send()`."
+
+[workspace]
+
+[dependencies]
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
