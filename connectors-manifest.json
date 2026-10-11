@@ -15,6 +15,15 @@
     },
     {
       "manifest": "github-pat/manifest.json"
+    },
+    {
+      "manifest": "gitlab/manifest.json"
+    },
+    {
+      "manifest": "gitlab-pat/manifest.json"
+    },
+    {
+      "manifest": "gdrive/manifest.json"
     }
   ],
   "manifestVersion": 1

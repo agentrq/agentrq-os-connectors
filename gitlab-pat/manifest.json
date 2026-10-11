@@ -1,0 +1,907 @@
+{
+  "$schema": "https://connectors.agentrq.com/schemas/manifest/v1.json",
+  "auth": {
+    "required": true,
+    "schemes": [
+      {
+        "type": "bearer"
+      }
+    ]
+  },
+  "description": "Work with GitLab through the REST API: projects, branches, commits, files, issues, merge requests and pipelines.",
+  "icons": [
+    {
+      "mimeType": "image/svg+xml",
+      "sizes": [
+        "any"
+      ],
+      "src": "https://raw.githubusercontent.com/agentrq/agentrq-os-connectors/main/gitlab-pat/icon.svg"
+    }
+  ],
+  "inputs": [
+    {
+      "default": "https://gitlab.com/api/v4",
+      "description": "Where the API is; it must be allowed below",
+      "name": "api_base",
+      "title": "API base URL",
+      "type": "string"
+    }
+  ],
+  "limits": {
+    "timeoutMs": 20000
+  },
+  "manifestVersion": 1,
+  "mcpVersion": "2026-07-28",
+  "name": "gitlab-pat",
+  "permissions": {
+    "http": {
+      "allow": [
+        "https://gitlab.com"
+      ]
+    }
+  },
+  "title": "GitLab (token)",
+  "tools": [
+    {
+      "annotations": {
+        "idempotentHint": true,
+        "openWorldHint": true,
+        "readOnlyHint": true
+      },
+      "description": "Get a project's details: description, visibility, default branch, counts",
+      "inputSchema": {
+        "additionalProperties": false,
+        "properties": {
+          "project_id": {
+            "description": "The project ID or URL-encoded path (namespace/project)",
+            "type": "string"
+          }
+        },
+        "required": [
+          "project_id"
+        ],
+        "type": "object"
+      },
+      "name": "getProject",
+      "title": "Get a project"
+    },
+    {
+      "annotations": {
+        "idempotentHint": true,
+        "openWorldHint": true,
+        "readOnlyHint": true
+      },
+      "description": "List projects visible to the signed-in user",
+      "inputSchema": {
+        "additionalProperties": false,
+        "properties": {
+          "archived": {
+            "description": "Only archived projects, or exclude them",
+            "type": "boolean"
+          },
+          "membership": {
+            "description": "Only projects the signed-in user is a member of",
+            "type": "boolean"
+          },
+          "order_by": {
+            "description": "id, name, path, created_at, updated_at or last_activity_at",
+            "type": "string"
+          },
+          "owned": {
+            "description": "Only projects owned by the signed-in user",
+            "type": "boolean"
+          },
+          "page": {
+            "description": "Page number, starting at 1",
+            "minimum": 1,
+            "type": "integer"
+          },
+          "per_page": {
+            "description": "Results per page, up to 100",
+            "maximum": 100,
+            "minimum": 1,
+            "type": "integer"
+          },
+          "search": {
+            "description": "Return projects matching the search string",
+            "type": "string"
+          },
+          "sort": {
+            "description": "asc or desc",
+            "type": "string"
+          },
+          "starred": {
+            "description": "Only projects starred by the signed-in user",
+            "type": "boolean"
+          },
+          "visibility": {
+            "description": "private, internal or public",
+            "type": "string"
+          }
+        },
+        "type": "object"
+      },
+      "name": "listProjects",
+      "title": "List projects"
+    },
+    {
+      "annotations": {
+        "destructiveHint": false,
+        "openWorldHint": true,
+        "readOnlyHint": false
+      },
+      "description": "Create a project for the signed-in user",
+      "inputSchema": {
+        "additionalProperties": false,
+        "properties": {
+          "description": {
+            "description": "A short description of the project",
+            "type": "string"
+          },
+          "initialize_with_readme": {
+            "description": "Create an initial commit with a README",
+            "type": "boolean"
+          },
+          "name": {
+            "description": "The project name",
+            "type": "string"
+          },
+          "path": {
+            "description": "The project slug; derived from the name when omitted",
+            "type": "string"
+          },
+          "visibility": {
+            "description": "private, internal or public",
+            "type": "string"
+          }
+        },
+        "required": [
+          "name"
+        ],
+        "type": "object"
+      },
+      "name": "createProject",
+      "title": "Create a project"
+    },
+    {
+      "annotations": {
+        "idempotentHint": true,
+        "openWorldHint": true,
+        "readOnlyHint": true
+      },
+      "description": "List a project's branches",
+      "inputSchema": {
+        "additionalProperties": false,
+        "properties": {
+          "page": {
+            "description": "Page number, starting at 1",
+            "minimum": 1,
+            "type": "integer"
+          },
+          "per_page": {
+            "description": "Results per page, up to 100",
+            "maximum": 100,
+            "minimum": 1,
+            "type": "integer"
+          },
+          "project_id": {
+            "description": "The project ID or URL-encoded path (namespace/project)",
+            "type": "string"
+          },
+          "search": {
+            "description": "Return branches matching the search string",
+            "type": "string"
+          }
+        },
+        "required": [
+          "project_id"
+        ],
+        "type": "object"
+      },
+      "name": "listBranches",
+      "title": "List branches"
+    },
+    {
+      "annotations": {
+        "idempotentHint": true,
+        "openWorldHint": true,
+        "readOnlyHint": true
+      },
+      "description": "List commits of a branch, tag or SHA, optionally limited to a path",
+      "inputSchema": {
+        "additionalProperties": false,
+        "properties": {
+          "page": {
+            "description": "Page number, starting at 1",
+            "minimum": 1,
+            "type": "integer"
+          },
+          "path": {
+            "description": "Only commits touching this file path",
+            "type": "string"
+          },
+          "per_page": {
+            "description": "Results per page, up to 100",
+            "maximum": 100,
+            "minimum": 1,
+            "type": "integer"
+          },
+          "project_id": {
+            "description": "The project ID or URL-encoded path (namespace/project)",
+            "type": "string"
+          },
+          "ref_name": {
+            "description": "Branch, tag or commit SHA to list commits from",
+            "type": "string"
+          }
+        },
+        "required": [
+          "project_id"
+        ],
+        "type": "object"
+      },
+      "name": "listCommits",
+      "title": "List commits"
+    },
+    {
+      "annotations": {
+        "idempotentHint": true,
+        "openWorldHint": true,
+        "readOnlyHint": true
+      },
+      "description": "Get one commit by branch, tag or SHA, with its diff",
+      "inputSchema": {
+        "additionalProperties": false,
+        "properties": {
+          "project_id": {
+            "description": "The project ID or URL-encoded path (namespace/project)",
+            "type": "string"
+          },
+          "sha": {
+            "description": "Branch, tag or commit SHA",
+            "type": "string"
+          }
+        },
+        "required": [
+          "project_id",
+          "sha"
+        ],
+        "type": "object"
+      },
+      "name": "getCommit",
+      "title": "Get a commit"
+    },
+    {
+      "annotations": {
+        "idempotentHint": true,
+        "openWorldHint": true,
+        "readOnlyHint": true
+      },
+      "description": "Get a file's contents (base64) and metadata, optionally at a ref",
+      "inputSchema": {
+        "additionalProperties": false,
+        "properties": {
+          "file_path": {
+            "description": "File path, e.g. src/lib.rs",
+            "type": "string"
+          },
+          "project_id": {
+            "description": "The project ID or URL-encoded path (namespace/project)",
+            "type": "string"
+          },
+          "ref": {
+            "description": "Branch, tag or commit SHA; the default branch when omitted",
+            "type": "string"
+          }
+        },
+        "required": [
+          "project_id",
+          "file_path"
+        ],
+        "type": "object"
+      },
+      "name": "getFile",
+      "title": "Get a file"
+    },
+    {
+      "annotations": {
+        "idempotentHint": true,
+        "openWorldHint": true,
+        "readOnlyHint": true
+      },
+      "description": "List a directory's entries (files and subdirectories), optionally at a ref",
+      "inputSchema": {
+        "additionalProperties": false,
+        "properties": {
+          "page": {
+            "description": "Page number, starting at 1",
+            "minimum": 1,
+            "type": "integer"
+          },
+          "path": {
+            "description": "Directory path; the repository root when omitted",
+            "type": "string"
+          },
+          "per_page": {
+            "description": "Results per page, up to 100",
+            "maximum": 100,
+            "minimum": 1,
+            "type": "integer"
+          },
+          "project_id": {
+            "description": "The project ID or URL-encoded path (namespace/project)",
+            "type": "string"
+          },
+          "recursive": {
+            "description": "List all entries recursively",
+            "type": "boolean"
+          },
+          "ref": {
+            "description": "Branch, tag or commit SHA; the default branch when omitted",
+            "type": "string"
+          }
+        },
+        "required": [
+          "project_id"
+        ],
+        "type": "object"
+      },
+      "name": "listRepositoryTree",
+      "title": "List repository tree"
+    },
+    {
+      "annotations": {
+        "destructiveHint": false,
+        "idempotentHint": true,
+        "openWorldHint": true,
+        "readOnlyHint": false
+      },
+      "description": "Create a file in the repository",
+      "inputSchema": {
+        "additionalProperties": false,
+        "properties": {
+          "branch": {
+            "description": "Branch to commit to",
+            "type": "string"
+          },
+          "commit_message": {
+            "description": "The commit message",
+            "type": "string"
+          },
+          "content": {
+            "description": "The new file content",
+            "type": "string"
+          },
+          "encoding": {
+            "description": "text or base64; text when omitted",
+            "type": "string"
+          },
+          "file_path": {
+            "description": "File path, e.g. docs/notes.md",
+            "type": "string"
+          },
+          "project_id": {
+            "description": "The project ID or URL-encoded path (namespace/project)",
+            "type": "string"
+          }
+        },
+        "required": [
+          "project_id",
+          "file_path",
+          "branch",
+          "commit_message",
+          "content"
+        ],
+        "type": "object"
+      },
+      "name": "createFile",
+      "title": "Create a file"
+    },
+    {
+      "annotations": {
+        "destructiveHint": false,
+        "openWorldHint": true,
+        "readOnlyHint": false
+      },
+      "description": "Update a file in the repository",
+      "inputSchema": {
+        "additionalProperties": false,
+        "properties": {
+          "branch": {
+            "description": "Branch to commit to",
+            "type": "string"
+          },
+          "commit_message": {
+            "description": "The commit message",
+            "type": "string"
+          },
+          "content": {
+            "description": "The new file content",
+            "type": "string"
+          },
+          "encoding": {
+            "description": "text or base64; text when omitted",
+            "type": "string"
+          },
+          "file_path": {
+            "description": "File path, e.g. docs/notes.md",
+            "type": "string"
+          },
+          "last_commit_id": {
+            "description": "Last known commit SHA, to fail if the file changed since",
+            "type": "string"
+          },
+          "project_id": {
+            "description": "The project ID or URL-encoded path (namespace/project)",
+            "type": "string"
+          }
+        },
+        "required": [
+          "project_id",
+          "file_path",
+          "branch",
+          "commit_message",
+          "content"
+        ],
+        "type": "object"
+      },
+      "name": "updateFile",
+      "title": "Update a file"
+    },
+    {
+      "annotations": {
+        "destructiveHint": true,
+        "openWorldHint": true,
+        "readOnlyHint": false
+      },
+      "description": "Delete a file from the repository",
+      "inputSchema": {
+        "additionalProperties": false,
+        "properties": {
+          "branch": {
+            "description": "Branch to commit to",
+            "type": "string"
+          },
+          "commit_message": {
+            "description": "The commit message",
+            "type": "string"
+          },
+          "file_path": {
+            "description": "File path, e.g. docs/notes.md",
+            "type": "string"
+          },
+          "project_id": {
+            "description": "The project ID or URL-encoded path (namespace/project)",
+            "type": "string"
+          }
+        },
+        "required": [
+          "project_id",
+          "file_path",
+          "branch",
+          "commit_message"
+        ],
+        "type": "object"
+      },
+      "name": "deleteFile",
+      "title": "Delete a file"
+    },
+    {
+      "annotations": {
+        "idempotentHint": true,
+        "openWorldHint": true,
+        "readOnlyHint": true
+      },
+      "description": "List a project's issues, optionally filtered by state and labels",
+      "inputSchema": {
+        "additionalProperties": false,
+        "properties": {
+          "labels": {
+            "description": "Comma-separated label names",
+            "type": "string"
+          },
+          "page": {
+            "description": "Page number, starting at 1",
+            "minimum": 1,
+            "type": "integer"
+          },
+          "per_page": {
+            "description": "Results per page, up to 100",
+            "maximum": 100,
+            "minimum": 1,
+            "type": "integer"
+          },
+          "project_id": {
+            "description": "The project ID or URL-encoded path (namespace/project)",
+            "type": "string"
+          },
+          "state": {
+            "description": "opened, closed or all",
+            "type": "string"
+          }
+        },
+        "required": [
+          "project_id"
+        ],
+        "type": "object"
+      },
+      "name": "listIssues",
+      "title": "List issues"
+    },
+    {
+      "annotations": {
+        "idempotentHint": true,
+        "openWorldHint": true,
+        "readOnlyHint": true
+      },
+      "description": "Get one issue by its internal ID",
+      "inputSchema": {
+        "additionalProperties": false,
+        "properties": {
+          "issue_iid": {
+            "description": "The issue's internal ID",
+            "minimum": 1,
+            "type": "integer"
+          },
+          "project_id": {
+            "description": "The project ID or URL-encoded path (namespace/project)",
+            "type": "string"
+          }
+        },
+        "required": [
+          "project_id",
+          "issue_iid"
+        ],
+        "type": "object"
+      },
+      "name": "getIssue",
+      "title": "Get an issue"
+    },
+    {
+      "annotations": {
+        "destructiveHint": false,
+        "openWorldHint": true,
+        "readOnlyHint": false
+      },
+      "description": "Create an issue in a project",
+      "inputSchema": {
+        "additionalProperties": false,
+        "properties": {
+          "assignee_ids": {
+            "description": "User IDs to assign the issue to",
+            "items": {
+              "type": "integer"
+            },
+            "type": "array"
+          },
+          "description": {
+            "description": "The issue text, in Markdown",
+            "type": "string"
+          },
+          "labels": {
+            "description": "Comma-separated label names",
+            "type": "string"
+          },
+          "project_id": {
+            "description": "The project ID or URL-encoded path (namespace/project)",
+            "type": "string"
+          },
+          "title": {
+            "description": "The issue title",
+            "type": "string"
+          }
+        },
+        "required": [
+          "project_id",
+          "title"
+        ],
+        "type": "object"
+      },
+      "name": "createIssue",
+      "title": "Create an issue"
+    },
+    {
+      "annotations": {
+        "destructiveHint": false,
+        "openWorldHint": true,
+        "readOnlyHint": false
+      },
+      "description": "Update an issue's title, description, state, labels or assignees",
+      "inputSchema": {
+        "additionalProperties": false,
+        "properties": {
+          "assignee_ids": {
+            "description": "User IDs to assign the issue to",
+            "items": {
+              "type": "integer"
+            },
+            "type": "array"
+          },
+          "description": {
+            "description": "The issue text, in Markdown",
+            "type": "string"
+          },
+          "issue_iid": {
+            "description": "The issue's internal ID",
+            "minimum": 1,
+            "type": "integer"
+          },
+          "labels": {
+            "description": "Comma-separated label names to set",
+            "type": "string"
+          },
+          "project_id": {
+            "description": "The project ID or URL-encoded path (namespace/project)",
+            "type": "string"
+          },
+          "state_event": {
+            "description": "close or reopen",
+            "type": "string"
+          },
+          "title": {
+            "description": "The issue title",
+            "type": "string"
+          }
+        },
+        "required": [
+          "project_id",
+          "issue_iid"
+        ],
+        "type": "object"
+      },
+      "name": "updateIssue",
+      "title": "Update an issue"
+    },
+    {
+      "annotations": {
+        "destructiveHint": false,
+        "openWorldHint": true,
+        "readOnlyHint": false
+      },
+      "description": "Comment on an issue",
+      "inputSchema": {
+        "additionalProperties": false,
+        "properties": {
+          "body": {
+            "description": "The comment text, in Markdown",
+            "type": "string"
+          },
+          "issue_iid": {
+            "description": "The issue's internal ID",
+            "minimum": 1,
+            "type": "integer"
+          },
+          "project_id": {
+            "description": "The project ID or URL-encoded path (namespace/project)",
+            "type": "string"
+          }
+        },
+        "required": [
+          "project_id",
+          "issue_iid",
+          "body"
+        ],
+        "type": "object"
+      },
+      "name": "createIssueNote",
+      "title": "Comment on an issue"
+    },
+    {
+      "annotations": {
+        "idempotentHint": true,
+        "openWorldHint": true,
+        "readOnlyHint": true
+      },
+      "description": "List a project's merge requests, optionally filtered by state and branches",
+      "inputSchema": {
+        "additionalProperties": false,
+        "properties": {
+          "page": {
+            "description": "Page number, starting at 1",
+            "minimum": 1,
+            "type": "integer"
+          },
+          "per_page": {
+            "description": "Results per page, up to 100",
+            "maximum": 100,
+            "minimum": 1,
+            "type": "integer"
+          },
+          "project_id": {
+            "description": "The project ID or URL-encoded path (namespace/project)",
+            "type": "string"
+          },
+          "source_branch": {
+            "description": "Source branch the merge requests come from",
+            "type": "string"
+          },
+          "state": {
+            "description": "opened, closed, merged or all",
+            "type": "string"
+          },
+          "target_branch": {
+            "description": "Target branch the merge requests target",
+            "type": "string"
+          }
+        },
+        "required": [
+          "project_id"
+        ],
+        "type": "object"
+      },
+      "name": "listMergeRequests",
+      "title": "List merge requests"
+    },
+    {
+      "annotations": {
+        "idempotentHint": true,
+        "openWorldHint": true,
+        "readOnlyHint": true
+      },
+      "description": "Get one merge request by its internal ID",
+      "inputSchema": {
+        "additionalProperties": false,
+        "properties": {
+          "merge_request_iid": {
+            "description": "The merge request's internal ID",
+            "minimum": 1,
+            "type": "integer"
+          },
+          "project_id": {
+            "description": "The project ID or URL-encoded path (namespace/project)",
+            "type": "string"
+          }
+        },
+        "required": [
+          "project_id",
+          "merge_request_iid"
+        ],
+        "type": "object"
+      },
+      "name": "getMergeRequest",
+      "title": "Get a merge request"
+    },
+    {
+      "annotations": {
+        "destructiveHint": false,
+        "openWorldHint": true,
+        "readOnlyHint": false
+      },
+      "description": "Open a merge request from a source branch into a target branch",
+      "inputSchema": {
+        "additionalProperties": false,
+        "properties": {
+          "description": {
+            "description": "The merge request text, in Markdown",
+            "type": "string"
+          },
+          "project_id": {
+            "description": "The project ID or URL-encoded path (namespace/project)",
+            "type": "string"
+          },
+          "source_branch": {
+            "description": "Source branch, e.g. feature/login",
+            "type": "string"
+          },
+          "target_branch": {
+            "description": "Target branch, e.g. main",
+            "type": "string"
+          },
+          "title": {
+            "description": "The merge request title",
+            "type": "string"
+          }
+        },
+        "required": [
+          "project_id",
+          "title",
+          "source_branch",
+          "target_branch"
+        ],
+        "type": "object"
+      },
+      "name": "createMergeRequest",
+      "title": "Create a merge request"
+    },
+    {
+      "annotations": {
+        "destructiveHint": true,
+        "openWorldHint": true,
+        "readOnlyHint": false
+      },
+      "description": "Accept (merge) a merge request",
+      "inputSchema": {
+        "additionalProperties": false,
+        "properties": {
+          "merge_commit_message": {
+            "description": "Custom merge commit message",
+            "type": "string"
+          },
+          "merge_request_iid": {
+            "description": "The merge request's internal ID",
+            "minimum": 1,
+            "type": "integer"
+          },
+          "project_id": {
+            "description": "The project ID or URL-encoded path (namespace/project)",
+            "type": "string"
+          },
+          "should_remove_source_branch": {
+            "description": "Remove the source branch after merging",
+            "type": "boolean"
+          },
+          "squash": {
+            "description": "Squash commits into a single commit when merging",
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "project_id",
+          "merge_request_iid"
+        ],
+        "type": "object"
+      },
+      "name": "acceptMergeRequest",
+      "title": "Merge a merge request"
+    },
+    {
+      "annotations": {
+        "idempotentHint": true,
+        "openWorldHint": true,
+        "readOnlyHint": true
+      },
+      "description": "Get the signed-in user's profile",
+      "inputSchema": {
+        "additionalProperties": false,
+        "properties": {},
+        "type": "object"
+      },
+      "name": "getCurrentUser",
+      "title": "Who am I"
+    },
+    {
+      "annotations": {
+        "idempotentHint": true,
+        "openWorldHint": true,
+        "readOnlyHint": true
+      },
+      "description": "List a project's pipelines, optionally filtered by status",
+      "inputSchema": {
+        "additionalProperties": false,
+        "properties": {
+          "page": {
+            "description": "Page number, starting at 1",
+            "minimum": 1,
+            "type": "integer"
+          },
+          "per_page": {
+            "description": "Results per page, up to 100",
+            "maximum": 100,
+            "minimum": 1,
+            "type": "integer"
+          },
+          "project_id": {
+            "description": "The project ID or URL-encoded path (namespace/project)",
+            "type": "string"
+          },
+          "ref": {
+            "description": "Branch or tag the pipelines ran for",
+            "type": "string"
+          },
+          "status": {
+            "description": "created, waiting_for_resource, preparing, pending, running, success, failed, canceled, skipped, manual or scheduled",
+            "type": "string"
+          }
+        },
+        "required": [
+          "project_id"
+        ],
+        "type": "object"
+      },
+      "name": "listPipelines",
+      "title": "List pipelines"
+    }
+  ],
+  "version": "0.1.0",
+  "websiteUrl": "https://docs.gitlab.com/ee/api/"
+}
