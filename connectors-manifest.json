@@ -24,6 +24,9 @@
     },
     {
       "manifest": "gdrive/manifest.json"
+    },
+    {
+      "manifest": "gmail/manifest.json"
     }
   ],
   "manifestVersion": 1
