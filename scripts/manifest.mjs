@@ -27,10 +27,11 @@
  * - An **error** is something the catalogue will not list: a document that is
  *   not JSON, a `manifestVersion` that is not 1, a name that is not a connector
  *   id, a path that leaves the repository — or a manifest with no `icons` or
- *   no `instructions`. The first group the server would refuse too; the second
+ *   no `instructions`, or an index that does not list its connectors in
+ *   alphanumeric order. The first group the server would refuse too; the rest
  *   is the catalogue's own bar, and it is deliberate: the server installs
  *   whatever it can, but the catalogue lists only a connector that shows an
- *   icon and tells the model how to use it.
+ *   icon, tells the model how to use it, and sits in an order a reader can scan.
  * - A **warning** is everything that depends on a version or on judgement — an
  *   unknown key (today's server refuses it, a newer one may not), a connector
  *   with no description, a repository whose licence the catalogue does not
@@ -231,6 +232,21 @@ export function parseIndex(source) {
     if (!parsed.ok) return fail(`${INDEX_FILE}: ${parsed.reason}`)
     if (manifests.includes(parsed.path)) return fail(`${INDEX_FILE}: it lists "${parsed.path}" twice.`)
     manifests.push(parsed.path)
+  }
+
+  // The index is the order the catalogue reads — and publishes — the
+  // connectors in, so it is the presentation order for this repository.
+  // Alphanumeric (code-point) order keeps that order readable and diffable,
+  // and the linter is the only thing that will ever keep it so. This is the
+  // catalogue's own bar, like `icons` and `instructions`: the server installs
+  // a misordered index fine, but the catalogue will not list it.
+  for (let i = 1; i < manifests.length; i += 1) {
+    if (manifests[i] < manifests[i - 1]) {
+      return fail(
+        `${INDEX_FILE}: "${manifests[i]}" is listed after "${manifests[i - 1]}", ` +
+          'but connectors must be listed in alphanumeric order.',
+      )
+    }
   }
 
   const bundles = parseBundles(doc.bundles)

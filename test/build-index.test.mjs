@@ -347,7 +347,7 @@ test('readConnectors follows the index when a repository publishes several', asy
     files: {
       [fileAt('acme/gmail', INDEX_FILE)]: JSON.stringify({
         manifestVersion: 1,
-        connectors: [{ manifest: 'gmail/manifest.json' }, { manifest: 'drive/manifest.json' }],
+        connectors: [{ manifest: 'drive/manifest.json' }, { manifest: 'gmail/manifest.json' }],
         bundles: [{ name: 'google', connectors: ['gmail', 'drive'] }],
       }),
       [fileAt('acme/gmail', 'gmail/manifest.json')]: manifestFor('gmail'),
@@ -356,7 +356,7 @@ test('readConnectors follows the index when a repository publishes several', asy
   })
   const read = await readConnectors(repoOf(), github.fetchText)
 
-  assert.deepEqual(read.connectors.map((c) => c.name), ['gmail', 'drive'])
+  assert.deepEqual(read.connectors.map((c) => c.name), ['drive', 'gmail'])
   assert.deepEqual(read.bundles[0].connectors, ['gmail', 'drive'])
   assert.deepEqual(read.warnings, [])
 })
