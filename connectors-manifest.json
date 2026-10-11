@@ -27,6 +27,9 @@
     },
     {
       "manifest": "gmail/manifest.json"
+    },
+    {
+      "manifest": "gtasks/manifest.json"
     }
   ],
   "manifestVersion": 1
