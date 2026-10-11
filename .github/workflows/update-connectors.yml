@@ -59,8 +59,11 @@ jobs:
       - name: Commit the catalogue
         if: steps.build.outputs.changed == 'true'
         env:
-          # gh does not pick up GITHUB_TOKEN on its own; it wants GH_TOKEN.
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          # gh does not pick up GITHUB_TOKEN on its own, and the Actions token
+          # is not permitted to open pull requests here anyway — so this is the
+          # GH_TOKEN secret (a personal token with contents and pull-request
+          # write on this repository), not secrets.GITHUB_TOKEN.
+          GH_TOKEN: ${{ secrets.GH_TOKEN }}
         run: |
           git config user.name 'github-actions[bot]'
           git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
