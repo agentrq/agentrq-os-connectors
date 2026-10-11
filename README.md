@@ -94,13 +94,15 @@ A row for a remote MCP server carries `remote` (`url`, `name`, `title`,
 
 The file itself also carries `$comment`, `schemaVersion`, `generatedAt`,
 `topics`, `acceptedLicenses`, `weights`, `truncated` (true only if GitHub's
-1000-result cap hid entries), `counts`, and `excluded`.
+1000-result cap hid entries), `counts`, and `excluded` — a reference to
+`excluded-connectors.json`, the companion file sitting next to it, so the file
+every install reads stays small.
 
 ## What is listed, and what is excluded
 
 `repositories` holds only what a server could actually offer. Everything else
-goes in `excluded`, with the reason, so an author can see why they are not in the
-catalogue rather than wondering:
+goes in `excluded-connectors.json`, with the reason, so an author can see why
+they are not in the catalogue rather than wondering:
 
 ```jsonc
 {

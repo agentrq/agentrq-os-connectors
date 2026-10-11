@@ -76,7 +76,7 @@ jobs:
             gh pr close "$stale"
           done
           git checkout -b "$branch"
-          git add connectors.json
+          git add connectors.json excluded-connectors.json
           git commit -m 'chore: update the connector catalogue'
           # The schedule is daily and the job is cancelled by a newer run, so a
           # push that lost a race is a stale result, not one worth retrying.
