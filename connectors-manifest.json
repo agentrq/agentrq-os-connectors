@@ -33,6 +33,9 @@
     },
     {
       "manifest": "gforms/manifest.json"
+    },
+    {
+      "manifest": "gslides/manifest.json"
     }
   ],
   "manifestVersion": 1
