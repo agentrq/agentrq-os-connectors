@@ -2,36 +2,63 @@
 
 An [AgentRQ](https://agentrq.com) connector (MCP server compiled to a `wasm32-wasip2`
 component) for the GitHub REST API, authenticated with a **fine-grained
-personal access token** you create. 20 tools mirroring the API's endpoints
-and parameter names: repositories, branches, commits, files, issues, pull
-requests and Actions workflow runs.
+personal access token** you create. 22 outcome-oriented tools for
+repositories, branches, commits, files, issues, pull requests and Actions
+workflow runs — designed so the agent makes one call per outcome instead of
+choreographing API calls itself. The tool surface is identical to the
+[`github`](../github/README.md) connector (OAuth); only the auth differs.
 
 ![icon](icon.svg)
 
 ## Tools
 
-| Tool | Maps to | What it does |
+| Tool | What it does |
+|---|---|
+| `getRepo` | Repository details |
+| `listRepos` | Repositories you can access |
+| `createRepo` | Create a repository (not available with a fine-grained token — see below) |
+| `readFile` | Read a file's content as decoded text (binary files come back as base64 with `isBinary: true`) |
+| `listDirectory` | List a directory's entries (`name`, `path`, `type`, `sha`, `size`); defaults to the root |
+| `writeFile` | Create or update a file with plain-text content; resolves the current SHA internally |
+| `deleteFile` | Delete a file; resolves its SHA internally |
+| `listBranches` | List branches |
+| `listCommits` | List commits, optionally by branch and path |
+| `getCommit` | One commit with its changed files and stats |
+| `listIssues` | List issues, optionally by state and labels |
+| `getIssue` | One issue **with its comments** |
+| `createIssue` | Create an issue |
+| `updateIssue` | Update title, body, state, labels, assignees |
+| `commentOnIssue` | Comment on an issue |
+| `listPulls` | List pull requests |
+| `getPull` | One pull request **with its changed files** (`filename`, `status`, `additions`, `deletions`) |
+| `createPull` | Open a pull request |
+| `mergePull` | Merge a pull request |
+| `proposeChanges` | Write files to a new branch and open a pull request — the whole flow in one call |
+| `getAuthenticatedUser` | The token owner's profile |
+| `listWorkflowRuns` | Actions workflow runs |
+
+## What changed in 0.2.0
+
+The tool surface was redesigned around agent outcomes instead of API
+endpoints (repo `AGENTS.md`: connectors are not 1:1 API mappings). One tool
+may make several API calls internally; the agent makes one call per outcome.
+The tool surface matches the [`github`](../github/README.md) connector
+exactly — only the auth differs.
+
+| Before (0.1.x) | After (0.2.0) | Rationale |
 |---|---|---|
-| `getRepo` | `GET /repos/{owner}/{repo}` | Repository details |
-| `listRepos` | `GET /user/repos` | Repositories you can access |
-| `createRepo` | `POST /user/repos` | Create a repository |
-| `listBranches` | `GET /repos/{owner}/{repo}/branches` | List branches |
-| `listCommits` | `GET /repos/{owner}/{repo}/commits` | List commits, optionally by path |
-| `getCommit` | `GET /repos/{owner}/{repo}/commits/{ref}` | One commit with files and stats |
-| `getContents` | `GET /repos/{owner}/{repo}/contents/{path}` | File or directory contents |
-| `createOrUpdateFile` | `PUT /repos/{owner}/{repo}/contents/{path}` | Create or update a file (base64) |
-| `deleteFile` | `DELETE /repos/{owner}/{repo}/contents/{path}` | Delete a file |
-| `listIssues` | `GET /repos/{owner}/{repo}/issues` | List issues |
-| `getIssue` | `GET /repos/{owner}/{repo}/issues/{number}` | One issue |
-| `createIssue` | `POST /repos/{owner}/{repo}/issues` | Create an issue |
-| `updateIssue` | `PATCH /repos/{owner}/{repo}/issues/{number}` | Update title, body, state, labels, assignees |
-| `createIssueComment` | `POST /repos/{owner}/{repo}/issues/{number}/comments` | Comment on an issue |
-| `listPulls` | `GET /repos/{owner}/{repo}/pulls` | List pull requests |
-| `getPull` | `GET /repos/{owner}/{repo}/pulls/{number}` | One pull request |
-| `createPull` | `POST /repos/{owner}/{repo}/pulls` | Open a pull request |
-| `mergePull` | `PUT /repos/{owner}/{repo}/pulls/{number}/merge` | Merge a pull request |
-| `getAuthenticatedUser` | `GET /user` | The token owner's profile |
-| `listWorkflowRuns` | `GET /repos/{owner}/{repo}/actions/runs` | Actions workflow runs |
+| `getContents` (file *or* directory, base64) | `readFile` + `listDirectory` | The dual file/dir behavior was confusing; `readFile` also decodes base64 internally, so agents stop hand-decoding |
+| `createOrUpdateFile` (base64 in, SHA in) | `writeFile` (plain text in, no SHA) | The connector resolves the current SHA itself (404 → create); the agent passes plain text |
+| `deleteFile` (SHA in) | `deleteFile` (no SHA) | The connector resolves the SHA itself |
+| `getIssue` | `getIssue` **+ comments** | Reading an issue with its discussion in one call (2 API calls internally) |
+| `getPull` | `getPull` **+ files** | Reviewing a PR with its diff stats in one call (2 API calls internally) |
+| `createIssueComment` | `commentOnIssue` | Verb-first naming, consistent with the other tools |
+| — | `proposeChanges` (new) | The flagship composed tool: resolve base → create tree (one call for N files) → commit → branch → PR (5 API calls internally). "Make these edits and open a PR" goes from ~6 agent calls to one |
+
+Everything else (`getRepo`, `listRepos`, `createRepo`, `listBranches`,
+`listCommits`, `getCommit`, `listIssues`, `createIssue`, `updateIssue`,
+`listPulls`, `createPull`, `mergePull`, `getAuthenticatedUser`,
+`listWorkflowRuns`) is unchanged.
 
 ## Auth
 
@@ -65,7 +92,7 @@ Two things to know:
 Built with the AgentRQ `wasmrs` connector toolchain:
 
 ```sh
-cargo test          # unit tests (100% line coverage required)
+cargo test          # unit tests (100% line and function coverage required)
 ```
 
 `sdk/connectors-sdk` is a host-side test double of the private AgentRQ

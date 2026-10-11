@@ -8,7 +8,7 @@
       }
     ]
   },
-  "description": "Work with GitHub through the REST API using a fine-grained personal access token: repositories, branches, commits, files, issues, pull requests and Actions workflow runs. You choose the repositories and permissions on the token.",
+  "description": "Work with GitHub through outcome-oriented tools: repositories, branches, commits, files, issues, pull requests and Actions workflow runs.",
   "icons": [
     {
       "src": "https://raw.githubusercontent.com/agentrq/agentrq-os-connectors/main/github-pat/icon.svg",
@@ -48,7 +48,7 @@
         "openWorldHint": true,
         "readOnlyHint": true
       },
-      "description": "Get a repository's details: description, visibility, default branch, counts",
+      "description": "Repository details: description, visibility, default branch, counts and URLs",
       "inputSchema": {
         "additionalProperties": false,
         "properties": {
@@ -68,7 +68,7 @@
         "type": "object"
       },
       "name": "getRepo",
-      "title": "Get a repository"
+      "title": "Get repository"
     },
     {
       "annotations": {
@@ -76,34 +76,43 @@
         "openWorldHint": true,
         "readOnlyHint": true
       },
-      "description": "List repositories the signed-in user can access",
+      "description": "Repositories the signed-in user can access",
       "inputSchema": {
         "additionalProperties": false,
         "properties": {
           "direction": {
-            "description": "asc or desc",
+            "description": "Sort direction: asc or desc",
+            "type": "string"
+          },
+          "owner": {
+            "description": "The repository owner's login",
             "type": "string"
           },
           "page": {
             "description": "Page number, starting at 1",
-            "minimum": 1,
-            "type": "integer"
+            "type": "integer",
+            "minimum": 1
           },
           "per_page": {
             "description": "Results per page, up to 100",
-            "maximum": 100,
+            "type": "integer",
             "minimum": 1,
-            "type": "integer"
+            "maximum": 100
+          },
+          "repo": {
+            "description": "The repository name",
+            "type": "string"
           },
           "sort": {
-            "description": "created, updated, pushed or full_name",
+            "description": "Sort by: created, updated, pushed, full_name",
             "type": "string"
           },
           "type": {
-            "description": "all, owner, public, private or member",
+            "description": "Filter by affiliation: all, owner, member",
             "type": "string"
           }
         },
+        "required": [],
         "type": "object"
       },
       "name": "listRepos",
@@ -120,11 +129,11 @@
         "additionalProperties": false,
         "properties": {
           "auto_init": {
-            "description": "Create an initial commit with an empty README",
+            "description": "Initialize with a README",
             "type": "boolean"
           },
           "description": {
-            "description": "A short description of the repository",
+            "description": "A short description",
             "type": "string"
           },
           "name": {
@@ -142,7 +151,170 @@
         "type": "object"
       },
       "name": "createRepo",
-      "title": "Create a repository"
+      "title": "Create repository"
+    },
+    {
+      "annotations": {
+        "idempotentHint": true,
+        "openWorldHint": true,
+        "readOnlyHint": true
+      },
+      "description": "Read a file's content as decoded text \u2014 no base64 handling needed; binary files come back as base64 with isBinary: true",
+      "inputSchema": {
+        "additionalProperties": false,
+        "properties": {
+          "owner": {
+            "description": "The repository owner's login",
+            "type": "string"
+          },
+          "path": {
+            "description": "File path, e.g. src/lib.rs",
+            "type": "string"
+          },
+          "ref": {
+            "description": "Branch, tag or commit SHA; the default branch when omitted",
+            "type": "string"
+          },
+          "repo": {
+            "description": "The repository name",
+            "type": "string"
+          }
+        },
+        "required": [
+          "owner",
+          "repo",
+          "path"
+        ],
+        "type": "object"
+      },
+      "name": "readFile",
+      "title": "Read file"
+    },
+    {
+      "annotations": {
+        "idempotentHint": true,
+        "openWorldHint": true,
+        "readOnlyHint": true
+      },
+      "description": "List a directory's entries (name, path, type, sha, size); defaults to the repository root",
+      "inputSchema": {
+        "additionalProperties": false,
+        "properties": {
+          "owner": {
+            "description": "The repository owner's login",
+            "type": "string"
+          },
+          "path": {
+            "description": "Directory path, e.g. docs; the repository root when omitted",
+            "type": "string"
+          },
+          "ref": {
+            "description": "Branch, tag or commit SHA; the default branch when omitted",
+            "type": "string"
+          },
+          "repo": {
+            "description": "The repository name",
+            "type": "string"
+          }
+        },
+        "required": [
+          "owner",
+          "repo"
+        ],
+        "type": "object"
+      },
+      "name": "listDirectory",
+      "title": "List directory"
+    },
+    {
+      "annotations": {
+        "destructiveHint": false,
+        "openWorldHint": true,
+        "readOnlyHint": false
+      },
+      "description": "Create or update a file with plain-text content; the current SHA is resolved internally, so no lookup call is needed",
+      "inputSchema": {
+        "additionalProperties": false,
+        "properties": {
+          "branch": {
+            "description": "Branch to commit to",
+            "type": "string"
+          },
+          "content": {
+            "description": "The new file content as plain text",
+            "type": "string"
+          },
+          "message": {
+            "description": "The commit message",
+            "type": "string"
+          },
+          "owner": {
+            "description": "The repository owner's login",
+            "type": "string"
+          },
+          "path": {
+            "description": "File path, e.g. docs/notes.md",
+            "type": "string"
+          },
+          "repo": {
+            "description": "The repository name",
+            "type": "string"
+          }
+        },
+        "required": [
+          "owner",
+          "repo",
+          "path",
+          "branch",
+          "content",
+          "message"
+        ],
+        "type": "object"
+      },
+      "name": "writeFile",
+      "title": "Write file"
+    },
+    {
+      "annotations": {
+        "destructiveHint": true,
+        "openWorldHint": true,
+        "readOnlyHint": false
+      },
+      "description": "Delete a file; its SHA is resolved internally, so no lookup call is needed",
+      "inputSchema": {
+        "additionalProperties": false,
+        "properties": {
+          "branch": {
+            "description": "Branch to commit the deletion to",
+            "type": "string"
+          },
+          "message": {
+            "description": "The commit message; defaults to \"delete {path}\"",
+            "type": "string"
+          },
+          "owner": {
+            "description": "The repository owner's login",
+            "type": "string"
+          },
+          "path": {
+            "description": "File path, e.g. docs/notes.md",
+            "type": "string"
+          },
+          "repo": {
+            "description": "The repository name",
+            "type": "string"
+          }
+        },
+        "required": [
+          "owner",
+          "repo",
+          "path",
+          "branch"
+        ],
+        "type": "object"
+      },
+      "name": "deleteFile",
+      "title": "Delete file"
     },
     {
       "annotations": {
@@ -160,14 +332,14 @@
           },
           "page": {
             "description": "Page number, starting at 1",
-            "minimum": 1,
-            "type": "integer"
+            "type": "integer",
+            "minimum": 1
           },
           "per_page": {
             "description": "Results per page, up to 100",
-            "maximum": 100,
+            "type": "integer",
             "minimum": 1,
-            "type": "integer"
+            "maximum": 100
           },
           "repo": {
             "description": "The repository name",
@@ -189,7 +361,7 @@
         "openWorldHint": true,
         "readOnlyHint": true
       },
-      "description": "List commits of a branch, tag or SHA, optionally limited to a path",
+      "description": "List commits, optionally filtered by branch and path",
       "inputSchema": {
         "additionalProperties": false,
         "properties": {
@@ -199,25 +371,25 @@
           },
           "page": {
             "description": "Page number, starting at 1",
-            "minimum": 1,
-            "type": "integer"
+            "type": "integer",
+            "minimum": 1
           },
           "path": {
-            "description": "Only commits touching this file path",
+            "description": "Only commits touching this path",
             "type": "string"
           },
           "per_page": {
             "description": "Results per page, up to 100",
-            "maximum": 100,
+            "type": "integer",
             "minimum": 1,
-            "type": "integer"
+            "maximum": 100
           },
           "repo": {
             "description": "The repository name",
             "type": "string"
           },
           "sha": {
-            "description": "Branch, tag or commit SHA to list commits from",
+            "description": "Branch, tag or SHA to list commits from",
             "type": "string"
           }
         },
@@ -236,7 +408,7 @@
         "openWorldHint": true,
         "readOnlyHint": true
       },
-      "description": "Get one commit by branch, tag or SHA, with its files and stats",
+      "description": "One commit with its changed files and stats",
       "inputSchema": {
         "additionalProperties": false,
         "properties": {
@@ -261,7 +433,7 @@
         "type": "object"
       },
       "name": "getCommit",
-      "title": "Get a commit"
+      "title": "Get commit"
     },
     {
       "annotations": {
@@ -269,143 +441,7 @@
         "openWorldHint": true,
         "readOnlyHint": true
       },
-      "description": "Get a file's or directory's contents (base64 for files), optionally at a ref",
-      "inputSchema": {
-        "additionalProperties": false,
-        "properties": {
-          "owner": {
-            "description": "The repository owner's login",
-            "type": "string"
-          },
-          "path": {
-            "description": "File or directory path, e.g. src/lib.rs",
-            "type": "string"
-          },
-          "ref": {
-            "description": "Branch, tag or commit SHA; the default branch when omitted",
-            "type": "string"
-          },
-          "repo": {
-            "description": "The repository name",
-            "type": "string"
-          }
-        },
-        "required": [
-          "owner",
-          "repo",
-          "path"
-        ],
-        "type": "object"
-      },
-      "name": "getContents",
-      "title": "Get file contents"
-    },
-    {
-      "annotations": {
-        "destructiveHint": false,
-        "idempotentHint": true,
-        "openWorldHint": true,
-        "readOnlyHint": false
-      },
-      "description": "Create or update a file; pass the file's current sha to update it",
-      "inputSchema": {
-        "additionalProperties": false,
-        "properties": {
-          "branch": {
-            "description": "Branch to commit to; the default branch when omitted",
-            "type": "string"
-          },
-          "content": {
-            "description": "The new file content, base64-encoded",
-            "type": "string"
-          },
-          "message": {
-            "description": "The commit message",
-            "type": "string"
-          },
-          "owner": {
-            "description": "The repository owner's login",
-            "type": "string"
-          },
-          "path": {
-            "description": "File path, e.g. docs/notes.md",
-            "type": "string"
-          },
-          "repo": {
-            "description": "The repository name",
-            "type": "string"
-          },
-          "sha": {
-            "description": "Blob SHA of the file being replaced; omit to create",
-            "type": "string"
-          }
-        },
-        "required": [
-          "owner",
-          "repo",
-          "path",
-          "message",
-          "content"
-        ],
-        "type": "object"
-      },
-      "name": "createOrUpdateFile",
-      "title": "Create or update a file"
-    },
-    {
-      "annotations": {
-        "destructiveHint": true,
-        "openWorldHint": true,
-        "readOnlyHint": false
-      },
-      "description": "Delete a file; pass the file's current blob sha",
-      "inputSchema": {
-        "additionalProperties": false,
-        "properties": {
-          "branch": {
-            "description": "Branch to commit to; the default branch when omitted",
-            "type": "string"
-          },
-          "message": {
-            "description": "The commit message",
-            "type": "string"
-          },
-          "owner": {
-            "description": "The repository owner's login",
-            "type": "string"
-          },
-          "path": {
-            "description": "File path, e.g. docs/notes.md",
-            "type": "string"
-          },
-          "repo": {
-            "description": "The repository name",
-            "type": "string"
-          },
-          "sha": {
-            "description": "Blob SHA of the file to delete, from getContents",
-            "type": "string"
-          }
-        },
-        "required": [
-          "owner",
-          "repo",
-          "path",
-          "message",
-          "sha"
-        ],
-        "type": "object"
-      },
-      "name": "deleteFile",
-      "title": "Delete a file"
-    },
-    {
-      "annotations": {
-        "idempotentHint": true,
-        "openWorldHint": true,
-        "readOnlyHint": true
-      },
-      "description": "List a repository's issues, optionally filtered by state and labels",
+      "description": "List issues, optionally filtered by state and labels",
       "inputSchema": {
         "additionalProperties": false,
         "properties": {
@@ -419,14 +455,14 @@
           },
           "page": {
             "description": "Page number, starting at 1",
-            "minimum": 1,
-            "type": "integer"
+            "type": "integer",
+            "minimum": 1
           },
           "per_page": {
             "description": "Results per page, up to 100",
-            "maximum": 100,
+            "type": "integer",
             "minimum": 1,
-            "type": "integer"
+            "maximum": 100
           },
           "repo": {
             "description": "The repository name",
@@ -452,14 +488,14 @@
         "openWorldHint": true,
         "readOnlyHint": true
       },
-      "description": "Get one issue by number",
+      "description": "One issue together with its comments \u2014 the issue and its discussion in a single call",
       "inputSchema": {
         "additionalProperties": false,
         "properties": {
           "issue_number": {
             "description": "The issue number",
-            "minimum": 1,
-            "type": "integer"
+            "type": "integer",
+            "minimum": 1
           },
           "owner": {
             "description": "The repository owner's login",
@@ -478,7 +514,7 @@
         "type": "object"
       },
       "name": "getIssue",
-      "title": "Get an issue"
+      "title": "Get issue with comments"
     },
     {
       "annotations": {
@@ -486,27 +522,27 @@
         "openWorldHint": true,
         "readOnlyHint": false
       },
-      "description": "Create an issue in a repository",
+      "description": "Create an issue",
       "inputSchema": {
         "additionalProperties": false,
         "properties": {
           "assignees": {
-            "description": "Logins to assign the issue to",
+            "description": "User logins to assign the issue to",
+            "type": "array",
             "items": {
               "type": "string"
-            },
-            "type": "array"
+            }
           },
           "body": {
-            "description": "The issue text, in Markdown",
+            "description": "The issue body, Markdown supported",
             "type": "string"
           },
           "labels": {
-            "description": "Label names to add",
+            "description": "Label names",
+            "type": "array",
             "items": {
               "type": "string"
-            },
-            "type": "array"
+            }
           },
           "owner": {
             "description": "The repository owner's login",
@@ -529,7 +565,7 @@
         "type": "object"
       },
       "name": "createIssue",
-      "title": "Create an issue"
+      "title": "Create issue"
     },
     {
       "annotations": {
@@ -542,27 +578,27 @@
         "additionalProperties": false,
         "properties": {
           "assignees": {
-            "description": "Logins to assign the issue to",
+            "description": "User logins to assign the issue to",
+            "type": "array",
             "items": {
               "type": "string"
-            },
-            "type": "array"
+            }
           },
           "body": {
-            "description": "The issue text, in Markdown",
+            "description": "The issue body, Markdown supported",
             "type": "string"
           },
           "issue_number": {
             "description": "The issue number",
-            "minimum": 1,
-            "type": "integer"
+            "type": "integer",
+            "minimum": 1
           },
           "labels": {
-            "description": "Label names to set",
+            "description": "Label names",
+            "type": "array",
             "items": {
               "type": "string"
-            },
-            "type": "array"
+            }
           },
           "owner": {
             "description": "The repository owner's login",
@@ -589,7 +625,7 @@
         "type": "object"
       },
       "name": "updateIssue",
-      "title": "Update an issue"
+      "title": "Update issue"
     },
     {
       "annotations": {
@@ -597,18 +633,18 @@
         "openWorldHint": true,
         "readOnlyHint": false
       },
-      "description": "Comment on an issue",
+      "description": "Add a comment to an issue",
       "inputSchema": {
         "additionalProperties": false,
         "properties": {
           "body": {
-            "description": "The comment text, in Markdown",
+            "description": "The comment text, Markdown supported",
             "type": "string"
           },
           "issue_number": {
             "description": "The issue number",
-            "minimum": 1,
-            "type": "integer"
+            "type": "integer",
+            "minimum": 1
           },
           "owner": {
             "description": "The repository owner's login",
@@ -627,8 +663,8 @@
         ],
         "type": "object"
       },
-      "name": "createIssueComment",
-      "title": "Comment on an issue"
+      "name": "commentOnIssue",
+      "title": "Comment on issue"
     },
     {
       "annotations": {
@@ -636,16 +672,16 @@
         "openWorldHint": true,
         "readOnlyHint": true
       },
-      "description": "List a repository's pull requests, optionally filtered by state, head and base",
+      "description": "List pull requests, optionally filtered by state and branches",
       "inputSchema": {
         "additionalProperties": false,
         "properties": {
           "base": {
-            "description": "Base branch the pull requests target",
+            "description": "Filter by base branch",
             "type": "string"
           },
           "head": {
-            "description": "Head branch the pull requests come from",
+            "description": "Filter by head branch",
             "type": "string"
           },
           "owner": {
@@ -654,14 +690,14 @@
           },
           "page": {
             "description": "Page number, starting at 1",
-            "minimum": 1,
-            "type": "integer"
+            "type": "integer",
+            "minimum": 1
           },
           "per_page": {
             "description": "Results per page, up to 100",
-            "maximum": 100,
+            "type": "integer",
             "minimum": 1,
-            "type": "integer"
+            "maximum": 100
           },
           "repo": {
             "description": "The repository name",
@@ -687,7 +723,7 @@
         "openWorldHint": true,
         "readOnlyHint": true
       },
-      "description": "Get one pull request by number",
+      "description": "One pull request together with its changed files (filename, status, additions, deletions)",
       "inputSchema": {
         "additionalProperties": false,
         "properties": {
@@ -697,8 +733,8 @@
           },
           "pull_number": {
             "description": "The pull request number",
-            "minimum": 1,
-            "type": "integer"
+            "type": "integer",
+            "minimum": 1
           },
           "repo": {
             "description": "The repository name",
@@ -713,7 +749,7 @@
         "type": "object"
       },
       "name": "getPull",
-      "title": "Get a pull request"
+      "title": "Get pull request with files"
     },
     {
       "annotations": {
@@ -721,16 +757,16 @@
         "openWorldHint": true,
         "readOnlyHint": false
       },
-      "description": "Open a pull request from a head branch into a base branch",
+      "description": "Open a pull request",
       "inputSchema": {
         "additionalProperties": false,
         "properties": {
           "base": {
-            "description": "Base branch, e.g. main",
+            "description": "The branch to merge into",
             "type": "string"
           },
           "body": {
-            "description": "The pull request text, in Markdown",
+            "description": "The pull request body, Markdown supported",
             "type": "string"
           },
           "draft": {
@@ -738,7 +774,7 @@
             "type": "boolean"
           },
           "head": {
-            "description": "Head branch, e.g. feature/login",
+            "description": "The branch containing the changes",
             "type": "string"
           },
           "owner": {
@@ -764,7 +800,7 @@
         "type": "object"
       },
       "name": "createPull",
-      "title": "Create a pull request"
+      "title": "Create pull request"
     },
     {
       "annotations": {
@@ -777,11 +813,11 @@
         "additionalProperties": false,
         "properties": {
           "commit_message": {
-            "description": "Extra detail for the merge commit message",
+            "description": "Extra detail for the merge commit",
             "type": "string"
           },
           "commit_title": {
-            "description": "Title for the automatic commit message",
+            "description": "Title for the merge commit",
             "type": "string"
           },
           "merge_method": {
@@ -794,8 +830,8 @@
           },
           "pull_number": {
             "description": "The pull request number",
-            "minimum": 1,
-            "type": "integer"
+            "type": "integer",
+            "minimum": 1
           },
           "repo": {
             "description": "The repository name",
@@ -810,7 +846,77 @@
         "type": "object"
       },
       "name": "mergePull",
-      "title": "Merge a pull request"
+      "title": "Merge pull request"
+    },
+    {
+      "annotations": {
+        "destructiveHint": false,
+        "openWorldHint": true,
+        "readOnlyHint": false
+      },
+      "description": "Write or update files on a new branch and open a pull request \u2014 the whole \"make these edits and open a PR\" flow in one call",
+      "inputSchema": {
+        "additionalProperties": false,
+        "properties": {
+          "base": {
+            "description": "The branch to start the new branch from",
+            "type": "string"
+          },
+          "body": {
+            "description": "The pull request body, Markdown supported",
+            "type": "string"
+          },
+          "files": {
+            "description": "Files to write; content is plain text",
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "content": {
+                  "description": "The file content as plain text",
+                  "type": "string"
+                },
+                "path": {
+                  "description": "File path, e.g. src/lib.rs",
+                  "type": "string"
+                }
+              },
+              "required": [
+                "path",
+                "content"
+              ],
+              "additionalProperties": false
+            }
+          },
+          "new_branch": {
+            "description": "The new branch to create",
+            "type": "string"
+          },
+          "owner": {
+            "description": "The repository owner's login",
+            "type": "string"
+          },
+          "repo": {
+            "description": "The repository name",
+            "type": "string"
+          },
+          "title": {
+            "description": "The pull request title",
+            "type": "string"
+          }
+        },
+        "required": [
+          "owner",
+          "repo",
+          "base",
+          "new_branch",
+          "files",
+          "title"
+        ],
+        "type": "object"
+      },
+      "name": "proposeChanges",
+      "title": "Propose changes"
     },
     {
       "annotations": {
@@ -818,14 +924,15 @@
         "openWorldHint": true,
         "readOnlyHint": true
       },
-      "description": "Get the signed-in user's profile",
+      "description": "The signed-in user's profile",
       "inputSchema": {
         "additionalProperties": false,
         "properties": {},
+        "required": [],
         "type": "object"
       },
       "name": "getAuthenticatedUser",
-      "title": "Who am I"
+      "title": "Get authenticated user"
     },
     {
       "annotations": {
@@ -833,7 +940,7 @@
         "openWorldHint": true,
         "readOnlyHint": true
       },
-      "description": "List a repository's Actions workflow runs, optionally filtered by status",
+      "description": "List Actions workflow runs, optionally filtered by status",
       "inputSchema": {
         "additionalProperties": false,
         "properties": {
@@ -843,21 +950,21 @@
           },
           "page": {
             "description": "Page number, starting at 1",
-            "minimum": 1,
-            "type": "integer"
+            "type": "integer",
+            "minimum": 1
           },
           "per_page": {
             "description": "Results per page, up to 100",
-            "maximum": 100,
+            "type": "integer",
             "minimum": 1,
-            "type": "integer"
+            "maximum": 100
           },
           "repo": {
             "description": "The repository name",
             "type": "string"
           },
           "status": {
-            "description": "completed, action_required, cancelled, failure, neutral, skipped, stale, success, timed_out, in_progress, queued, requested, waiting or pending",
+            "description": "Filter by status, e.g. queued, in_progress, completed",
             "type": "string"
           }
         },
@@ -871,6 +978,6 @@
       "title": "List workflow runs"
     }
   ],
-  "version": "0.1.0",
+  "version": "0.2.0",
   "websiteUrl": "https://docs.github.com/en/rest"
 }
