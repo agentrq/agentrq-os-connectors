@@ -22,14 +22,14 @@
       }
     ]
   },
-  "description": "Read, create and edit Google Docs: fetch a document's content, create new documents, and apply batch edits.",
+  "description": "Read, create and edit Google Docs with task-shaped tools: read a document as plain text, create a document with content, and apply typed edits in one batch.",
   "icons": [
     {
-      "src": "https://raw.githubusercontent.com/agentrq/agentrq-os-connectors/main/gdocs/icon.svg",
       "mimeType": "image/svg+xml",
       "sizes": [
         "any"
-      ]
+      ],
+      "src": "https://raw.githubusercontent.com/agentrq/agentrq-os-connectors/main/gdocs/icon.svg"
     }
   ],
   "inputs": [
@@ -62,20 +62,12 @@
         "openWorldHint": true,
         "readOnlyHint": true
       },
-      "description": "Get a document's content: title, body structure, tabs and formatting",
+      "description": "Read a Google Doc as plain text: its title and the text of its paragraphs, lists and tables",
       "inputSchema": {
         "additionalProperties": false,
         "properties": {
           "documentId": {
             "description": "The document's ID",
-            "type": "string"
-          },
-          "includeTabsContent": {
-            "description": "Include tab content in the response",
-            "type": "boolean"
-          },
-          "suggestionsViewMode": {
-            "description": "How suggestions appear: DEFAULT_FOR_CURRENT_ACCESS, SUGGESTIONS_INLINE or PREVIEW_WITHOUT_SUGGESTIONS",
             "type": "string"
           }
         },
@@ -84,7 +76,7 @@
         ],
         "type": "object"
       },
-      "name": "getDocument",
+      "name": "readDocument",
       "title": "Read a document"
     },
     {
@@ -93,10 +85,14 @@
         "openWorldHint": true,
         "readOnlyHint": false
       },
-      "description": "Create a new empty document with the given title",
+      "description": "Create a new Google Doc with a title, optionally with initial text content",
       "inputSchema": {
         "additionalProperties": false,
         "properties": {
+          "text": {
+            "description": "Initial text content of the document",
+            "type": "string"
+          },
           "title": {
             "description": "Title of the new document",
             "minLength": 1,
@@ -117,7 +113,7 @@
         "openWorldHint": true,
         "readOnlyHint": false
       },
-      "description": "Apply edits to a document: insert or delete text, replace text, update formatting and styles",
+      "description": "Apply typed edits to a Google Doc in one batch: append text, insert text at an index, replace text, or delete a range. Indices are UTF-16 code-unit offsets, as the Docs API counts them.",
       "inputSchema": {
         "additionalProperties": false,
         "properties": {
@@ -125,28 +121,71 @@
             "description": "The document's ID",
             "type": "string"
           },
-          "requests": {
-            "description": "Docs API request objects, e.g. insertText, deleteContentRange, replaceAllText, updateTextStyle",
+          "edits": {
+            "description": "Edits to apply, in order, in a single batchUpdate call",
             "items": {
+              "additionalProperties": false,
+              "properties": {
+                "endIndex": {
+                  "description": "End of the range to delete, exclusive (deleteRange)",
+                  "minimum": 0,
+                  "type": "integer"
+                },
+                "find": {
+                  "description": "Text to find (replace)",
+                  "type": "string"
+                },
+                "index": {
+                  "description": "UTF-16 code-unit index to insert at (insert)",
+                  "minimum": 0,
+                  "type": "integer"
+                },
+                "matchCase": {
+                  "description": "Match case when finding text (replace)",
+                  "type": "boolean"
+                },
+                "op": {
+                  "description": "The edit operation",
+                  "enum": [
+                    "append",
+                    "insert",
+                    "replace",
+                    "deleteRange"
+                  ],
+                  "type": "string"
+                },
+                "replace": {
+                  "description": "Replacement text (replace)",
+                  "type": "string"
+                },
+                "startIndex": {
+                  "description": "Start of the range to delete, inclusive (deleteRange)",
+                  "minimum": 0,
+                  "type": "integer"
+                },
+                "text": {
+                  "description": "Text to append or insert (append, insert)",
+                  "type": "string"
+                }
+              },
+              "required": [
+                "op"
+              ],
               "type": "object"
             },
             "type": "array"
-          },
-          "writeControl": {
-            "description": "Optional write control, e.g. {\"requiredRevisionId\": \"...\"} to guard against concurrent edits",
-            "type": "object"
           }
         },
         "required": [
           "documentId",
-          "requests"
+          "edits"
         ],
         "type": "object"
       },
-      "name": "batchUpdate",
+      "name": "editDocument",
       "title": "Edit a document"
     }
   ],
-  "version": "0.1.0",
+  "version": "0.2.0",
   "websiteUrl": "https://developers.google.com/workspace/docs/api"
 }
