@@ -128,6 +128,15 @@ The policy does **not** apply to remote MCP servers. There is no code to license
 — the repository is a pointer to somebody's hosted service — so refusing one over
 its own licence would be refusing to list the service.
 
+### Icons and instructions
+
+Every listed connector's `manifest.json` must carry a non-empty `icons` array
+(each entry with an `https:` or `data:` `src`) and a non-empty `instructions`
+string: guidance for the model using the connector. A connector without either
+is excluded, with the reason naming the manifest and the missing field. The
+`instructions` key is part of the manifest schema, so a manifest carrying it
+still installs.
+
 ### Errors and warnings
 
 The server reads these same documents at install time, on one person's machine,
@@ -136,15 +145,18 @@ the author — who has no failing install of their own connector. Reading them h
 once a day, in public, is what turns a private install failure into something its
 author can find.
 
-It follows that this must never be *stricter* than the server, which is what the
-split enforces:
+It follows that this is stricter than the server in exactly one place, which is
+what the split enforces:
 
-- An **error** excludes the row, and is something the server would refuse too: a
+- An **error** excludes the row. Most are things the server would refuse too: a
   document that is not JSON, a `manifestVersion` that is not 1, a name that is not
   a connector id, a path that leaves the repository, a release with no `.wasm`.
+  Two are the catalogue's own bar: a manifest with no `icons`, or no
+  `instructions`. The server installs whatever it can, but the catalogue lists
+  only a connector that shows an icon and tells the model how to use it.
 - A **warning** is published beside the row and costs it points: a key the server
   does not know (today's server refuses it — a newer one may not), a connector
-  with no description or icons, a release asset with no digest for an install to
+  with no description, a release asset with no digest for an install to
   verify, a pre-release, an archived repository, a contested name.
 
 Two judgements are deliberately refused:

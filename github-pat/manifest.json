@@ -27,6 +27,7 @@
       "type": "string"
     }
   ],
+  "instructions": "Repositories are addressed as owner/name. Prefer readFile for file content (decoded text, binaries flagged) and listDirectory for browsing \u2014 writeFile and deleteFile resolve SHAs internally. getIssue includes comments and getPull includes changed files. Use proposeChanges for the full edit-branch-open-PR flow in one call; only mergePull when the user explicitly asks to merge.",
   "limits": {
     "timeoutMs": 20000
   },

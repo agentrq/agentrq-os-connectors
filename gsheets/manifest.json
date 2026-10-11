@@ -41,6 +41,7 @@
       "type": "string"
     }
   ],
+  "instructions": "Read before writing: use getValues or readTable to see the current data, then updateValues for targeted edits or appendValues for new rows. Ranges use A1 notation. createSpreadsheet takes the initial data along, so a new spreadsheet rarely needs a second call. Prefer the task-shaped tools over batchUpdate unless you are composing a genuinely custom request.",
   "limits": {
     "timeoutMs": 20000
   },

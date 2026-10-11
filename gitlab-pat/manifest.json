@@ -27,6 +27,7 @@
       "type": "string"
     }
   ],
+  "instructions": "Projects are addressed by numeric ID or URL-encoded namespace/path; resolve them with listProjects first. Use proposeChanges to open a merge request carrying multi-file changes in one call. This connector authenticates with a personal access token: it can only touch what the token's scopes allow, so a 'not found' on a project you know exists usually means the token lacks access.",
   "limits": {
     "timeoutMs": 20000
   },

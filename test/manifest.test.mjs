@@ -6,8 +6,9 @@
  * Tests for the readers of a connector repository's documents.
  *
  * Every rule here exists to match one in `crates/domain/src/catalog/` of
- * `agentrq/connectors`, so several tests below are written as "the server would
- * refuse this too". The error/warning split is the module's point and is
+ * `agentrq/connectors`, except the listing bar — `icons` and `instructions`
+ * are required to be listed, which is this catalogue's own rule, stricter than
+ * the server on purpose. The error/warning split is the module's point and is
  * asserted directly: a check being a warning and not an error is the thing that
  * keeps a nightly job from declaring a connector broken on behalf of an install
  * it has never seen.
@@ -33,7 +34,7 @@ import {
   parseRemoteFile,
 } from '../scripts/manifest.mjs'
 
-/** The smallest manifest the server accepts. */
+/** The smallest manifest the catalogue lists. */
 function manifest(overrides = {}) {
   return JSON.stringify({
     manifestVersion: 1,
@@ -41,6 +42,7 @@ function manifest(overrides = {}) {
     name: 'gmail',
     version: '0.1.0',
     description: 'Reads Gmail threads.',
+    instructions: 'Search threads with listThreads, then read one with getThread.',
     icons: [{ src: 'data:image/svg+xml;base64,AAA', mimeType: 'image/svg+xml', sizes: ['any'] }],
     tools: [{ name: 'listThreads' }],
     ...overrides,
@@ -218,18 +220,37 @@ test('an unknown manifest key is a warning, although the server refuses it today
 })
 
 test('the known manifest keys are the ones manifest.rs declares', () => {
-  for (const key of ['$schema', 'manifestVersion', 'mcpVersion', 'name', 'title', 'version', 'description', 'websiteUrl', 'icons', 'tools', 'resources', 'resourceTemplates', 'prompts', 'skills', 'auth', 'inputs', 'permissions', 'limits', 'remote', 'workflow']) {
+  for (const key of ['$schema', 'manifestVersion', 'mcpVersion', 'name', 'title', 'version', 'description', 'instructions', 'websiteUrl', 'icons', 'tools', 'resources', 'resourceTemplates', 'prompts', 'skills', 'auth', 'inputs', 'permissions', 'limits', 'remote', 'workflow']) {
     assert.equal(MANIFEST_KEYS.has(key), true, key)
   }
-  assert.equal(MANIFEST_KEYS.size, 20)
+  assert.equal(MANIFEST_KEYS.size, 21)
+})
+
+test('a connector with no icon is not listed', () => {
+  assert.match(parse({ icons: [] }).reason, /"icons" is required/)
+  assert.match(parse({ icons: undefined }).reason, /"icons" is required/)
+  assert.match(parse({ icons: [{ mimeType: 'image/svg+xml' }] }).reason, /every "icons" entry needs a "src"/)
+})
+
+test('a connector with no instructions is not listed', () => {
+  assert.match(parse({ instructions: '' }).reason, /"instructions" is required/)
+  assert.match(parse({ instructions: undefined }).reason, /"instructions" is required/)
 })
 
 test('a thin listing is warned about, not refused', () => {
-  const parsed = parseManifest(JSON.stringify({ manifestVersion: 1, mcpVersion: '2026-07-28', name: 'gmail', version: '0.1.0' }))
+  const parsed = parseManifest(
+    JSON.stringify({
+      manifestVersion: 1,
+      mcpVersion: '2026-07-28',
+      name: 'gmail',
+      version: '0.1.0',
+      icons: [{ src: 'data:image/svg+xml;base64,AAA', mimeType: 'image/svg+xml', sizes: ['any'] }],
+      instructions: 'Do gmail things.',
+    }),
+  )
   assert.equal(parsed.ok, true)
   const text = parsed.warnings.join('\n')
   assert.match(text, /no "description"/)
-  assert.match(text, /no "icons"/)
   assert.match(text, /declares no tools/)
 })
 
