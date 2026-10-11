@@ -208,296 +208,26 @@ connectors_sdk::export_connector!(GithubPat);
 fn outgoing(base: &str, request: &ToolRequest) -> Result<Request, ConnectorError> {
     let api = base.trim_end_matches('/');
     let outgoing = match request.tool.as_str() {
-        "getRepo" => {
-            let input: RepoRef = request.json()?;
-            Request::get(format!(
-                "{api}/repos/{}/{}",
-                encode(&input.owner),
-                encode(&input.repo)
-            ))
-        }
-        "listRepos" => {
-            let input: ListRepos = request.json()?;
-            Request::get(with_query(
-                format!("{api}/user/repos"),
-                &[
-                    ("type", input.repo_type),
-                    ("sort", input.sort),
-                    ("direction", input.direction),
-                    ("per_page", input.per_page.map(|n| n.to_string())),
-                    ("page", input.page.map(|n| n.to_string())),
-                ],
-            ))
-        }
-        "createRepo" => {
-            let input: CreateRepo = request.json()?;
-            let body = object(&[
-                ("name", Some(json!(input.name))),
-                (
-                    "description",
-                    input
-                        .description
-                        .as_ref()
-                        .map(|description| json!(description)),
-                ),
-                ("private", input.private.map(|private| json!(private))),
-                (
-                    "auto_init",
-                    input.auto_init.map(|auto_init| json!(auto_init)),
-                ),
-            ]);
-            Request::post(format!("{api}/user/repos")).json(&body)?
-        }
-        "listBranches" => {
-            let input: ListBranches = request.json()?;
-            Request::get(with_query(
-                format!(
-                    "{api}/repos/{}/{}",
-                    encode(&input.owner),
-                    encode(&input.repo)
-                ) + "/branches",
-                &[
-                    ("per_page", input.per_page.map(|n| n.to_string())),
-                    ("page", input.page.map(|n| n.to_string())),
-                ],
-            ))
-        }
-        "listCommits" => {
-            let input: ListCommits = request.json()?;
-            Request::get(with_query(
-                format!(
-                    "{api}/repos/{}/{}",
-                    encode(&input.owner),
-                    encode(&input.repo)
-                ) + "/commits",
-                &[
-                    ("sha", input.sha),
-                    ("path", input.path),
-                    ("per_page", input.per_page.map(|n| n.to_string())),
-                    ("page", input.page.map(|n| n.to_string())),
-                ],
-            ))
-        }
-        "getCommit" => {
-            let input: GetCommit = request.json()?;
-            Request::get(format!(
-                "{api}/repos/{}/{}/commits/{}",
-                encode(&input.owner),
-                encode(&input.repo),
-                encode(&input.ref_)
-            ))
-        }
-        "getContents" => {
-            let input: GetContents = request.json()?;
-            Request::get(with_query(
-                format!(
-                    "{api}/repos/{}/{}/contents/{}",
-                    encode(&input.owner),
-                    encode(&input.repo),
-                    encode_path(&input.path)
-                ),
-                &[("ref", input.ref_)],
-            ))
-        }
-        "createOrUpdateFile" => {
-            let input: CreateOrUpdateFile = request.json()?;
-            let body = object(&[
-                ("message", Some(json!(input.message))),
-                ("content", Some(json!(input.content))),
-                ("sha", input.sha.as_ref().map(|sha| json!(sha))),
-                ("branch", input.branch.as_ref().map(|branch| json!(branch))),
-            ]);
-            Request::new(
-                Method::Put,
-                format!(
-                    "{api}/repos/{}/{}/contents/{}",
-                    encode(&input.owner),
-                    encode(&input.repo),
-                    encode_path(&input.path)
-                ),
-            )
-            .json(&body)?
-        }
-        "deleteFile" => {
-            let input: DeleteFile = request.json()?;
-            let body = object(&[
-                ("message", Some(json!(input.message))),
-                ("sha", Some(json!(input.sha))),
-                ("branch", input.branch.as_ref().map(|branch| json!(branch))),
-            ]);
-            Request::new(
-                Method::Delete,
-                format!(
-                    "{api}/repos/{}/{}/contents/{}",
-                    encode(&input.owner),
-                    encode(&input.repo),
-                    encode_path(&input.path)
-                ),
-            )
-            .json(&body)?
-        }
-        "listIssues" => {
-            let input: ListIssues = request.json()?;
-            Request::get(with_query(
-                format!(
-                    "{api}/repos/{}/{}",
-                    encode(&input.owner),
-                    encode(&input.repo)
-                ) + "/issues",
-                &[
-                    ("state", input.state),
-                    ("labels", input.labels),
-                    ("per_page", input.per_page.map(|n| n.to_string())),
-                    ("page", input.page.map(|n| n.to_string())),
-                ],
-            ))
-        }
-        "getIssue" => {
-            let input: IssueRef = request.json()?;
-            Request::get(format!(
-                "{api}/repos/{}/{}/issues/{}",
-                encode(&input.owner),
-                encode(&input.repo),
-                input.issue_number
-            ))
-        }
-        "createIssue" => {
-            let input: CreateIssue = request.json()?;
-            let body = object(&[
-                ("title", Some(json!(input.title))),
-                ("body", input.body.as_ref().map(|body| json!(body))),
-                ("labels", input.labels.as_ref().map(|labels| json!(labels))),
-                (
-                    "assignees",
-                    input.assignees.as_ref().map(|assignees| json!(assignees)),
-                ),
-            ]);
-            Request::post(format!(
-                "{api}/repos/{}/{}/issues",
-                encode(&input.owner),
-                encode(&input.repo)
-            ))
-            .json(&body)?
-        }
-        "updateIssue" => {
-            let input: UpdateIssue = request.json()?;
-            let body = object(&[
-                ("title", input.title.as_ref().map(|title| json!(title))),
-                ("body", input.body.as_ref().map(|body| json!(body))),
-                ("state", input.state.as_ref().map(|state| json!(state))),
-                ("labels", input.labels.as_ref().map(|labels| json!(labels))),
-                (
-                    "assignees",
-                    input.assignees.as_ref().map(|assignees| json!(assignees)),
-                ),
-            ]);
-            Request::new(
-                Method::Patch,
-                format!(
-                    "{api}/repos/{}/{}/issues/{}",
-                    encode(&input.owner),
-                    encode(&input.repo),
-                    input.issue_number
-                ),
-            )
-            .json(&body)?
-        }
-        "createIssueComment" => {
-            let input: CreateIssueComment = request.json()?;
-            let body = object(&[("body", Some(json!(input.body)))]);
-            Request::post(format!(
-                "{api}/repos/{}/{}/issues/{}/comments",
-                encode(&input.owner),
-                encode(&input.repo),
-                input.issue_number
-            ))
-            .json(&body)?
-        }
-        "listPulls" => {
-            let input: ListPulls = request.json()?;
-            Request::get(with_query(
-                format!(
-                    "{api}/repos/{}/{}",
-                    encode(&input.owner),
-                    encode(&input.repo)
-                ) + "/pulls",
-                &[
-                    ("state", input.state),
-                    ("head", input.head),
-                    ("base", input.base),
-                    ("per_page", input.per_page.map(|n| n.to_string())),
-                    ("page", input.page.map(|n| n.to_string())),
-                ],
-            ))
-        }
-        "getPull" => {
-            let input: PullRef = request.json()?;
-            Request::get(format!(
-                "{api}/repos/{}/{}/pulls/{}",
-                encode(&input.owner),
-                encode(&input.repo),
-                input.pull_number
-            ))
-        }
-        "createPull" => {
-            let input: CreatePull = request.json()?;
-            let body = object(&[
-                ("title", Some(json!(input.title))),
-                ("head", Some(json!(input.head))),
-                ("base", Some(json!(input.base))),
-                ("body", input.body.as_ref().map(|body| json!(body))),
-                ("draft", input.draft.map(|draft| json!(draft))),
-            ]);
-            Request::post(format!(
-                "{api}/repos/{}/{}/pulls",
-                encode(&input.owner),
-                encode(&input.repo)
-            ))
-            .json(&body)?
-        }
-        "mergePull" => {
-            let input: MergePull = request.json()?;
-            let body = object(&[
-                (
-                    "commit_title",
-                    input.commit_title.as_ref().map(|title| json!(title)),
-                ),
-                (
-                    "commit_message",
-                    input.commit_message.as_ref().map(|message| json!(message)),
-                ),
-                (
-                    "merge_method",
-                    input.merge_method.as_ref().map(|method| json!(method)),
-                ),
-            ]);
-            Request::new(
-                Method::Put,
-                format!(
-                    "{api}/repos/{}/{}/pulls/{}/merge",
-                    encode(&input.owner),
-                    encode(&input.repo),
-                    input.pull_number
-                ),
-            )
-            .json(&body)?
-        }
-        "getAuthenticatedUser" => Request::get(format!("{api}/user")),
-        "listWorkflowRuns" => {
-            let input: ListWorkflowRuns = request.json()?;
-            Request::get(with_query(
-                format!(
-                    "{api}/repos/{}/{}",
-                    encode(&input.owner),
-                    encode(&input.repo)
-                ) + "/actions/runs",
-                &[
-                    ("status", input.status),
-                    ("per_page", input.per_page.map(|n| n.to_string())),
-                    ("page", input.page.map(|n| n.to_string())),
-                ],
-            ))
-        }
+        "getRepo" => plan_get_repo(api, request)?,
+        "listRepos" => plan_list_repos(api, request)?,
+        "createRepo" => plan_create_repo(api, request)?,
+        "listBranches" => plan_list_branches(api, request)?,
+        "listCommits" => plan_list_commits(api, request)?,
+        "getCommit" => plan_get_commit(api, request)?,
+        "getContents" => plan_get_contents(api, request)?,
+        "createOrUpdateFile" => plan_create_or_update_file(api, request)?,
+        "deleteFile" => plan_delete_file(api, request)?,
+        "listIssues" => plan_list_issues(api, request)?,
+        "getIssue" => plan_get_issue(api, request)?,
+        "createIssue" => plan_create_issue(api, request)?,
+        "updateIssue" => plan_update_issue(api, request)?,
+        "createIssueComment" => plan_create_issue_comment(api, request)?,
+        "listPulls" => plan_list_pulls(api, request)?,
+        "getPull" => plan_get_pull(api, request)?,
+        "createPull" => plan_create_pull(api, request)?,
+        "mergePull" => plan_merge_pull(api, request)?,
+        "getAuthenticatedUser" => plan_get_authenticated_user(api)?,
+        "listWorkflowRuns" => plan_list_workflow_runs(api, request)?,
         other => return Err(ConnectorError::NotFound(format!("no tool {other}"))),
     };
     // GitHub requires a User-Agent; the API version header pins the behavior.
@@ -510,6 +240,287 @@ fn outgoing(base: &str, request: &ToolRequest) -> Result<Request, ConnectorError
         .header("x-github-api-version", "2022-11-28"))
 }
 
+/// `{api}/repos/{owner}/{repo}`, with the owner and repo percent-encoded.
+fn repo_path(api: &str, owner: &str, repo: &str) -> String {
+    format!("{api}/repos/{}/{}", encode(owner), encode(repo))
+}
+
+/// The `per_page`/`page` query pair shared by every listing tool.
+fn page_params(per_page: Option<u32>, page: Option<u32>) -> [(&'static str, Option<String>); 2] {
+    [
+        ("per_page", per_page.map(|n| n.to_string())),
+        ("page", page.map(|n| n.to_string())),
+    ]
+}
+
+fn plan_get_repo(api: &str, request: &ToolRequest) -> Result<Request, ConnectorError> {
+    let input: RepoRef = request.json()?;
+    Ok(Request::get(repo_path(api, &input.owner, &input.repo)))
+}
+
+fn plan_list_repos(api: &str, request: &ToolRequest) -> Result<Request, ConnectorError> {
+    let input: ListRepos = request.json()?;
+    let mut params: Vec<(&str, Option<String>)> = Vec::with_capacity(5);
+    params.push(("type", input.repo_type));
+    params.push(("sort", input.sort));
+    params.push(("direction", input.direction));
+    params.extend(page_params(input.per_page, input.page));
+    Ok(Request::get(with_query(
+        format!("{api}/user/repos"),
+        &params,
+    )))
+}
+
+fn plan_create_repo(api: &str, request: &ToolRequest) -> Result<Request, ConnectorError> {
+    let input: CreateRepo = request.json()?;
+    let body = object(&[
+        ("name", Some(json!(input.name))),
+        (
+            "description",
+            input
+                .description
+                .as_ref()
+                .map(|description| json!(description)),
+        ),
+        ("private", input.private.map(|private| json!(private))),
+        (
+            "auto_init",
+            input.auto_init.map(|auto_init| json!(auto_init)),
+        ),
+    ]);
+    Request::post(format!("{api}/user/repos")).json(&body)
+}
+
+fn plan_list_branches(api: &str, request: &ToolRequest) -> Result<Request, ConnectorError> {
+    let input: ListBranches = request.json()?;
+    Ok(Request::get(with_query(
+        format!("{}/branches", repo_path(api, &input.owner, &input.repo)),
+        &page_params(input.per_page, input.page),
+    )))
+}
+
+fn plan_list_commits(api: &str, request: &ToolRequest) -> Result<Request, ConnectorError> {
+    let input: ListCommits = request.json()?;
+    let mut params: Vec<(&str, Option<String>)> = Vec::with_capacity(4);
+    params.push(("sha", input.sha));
+    params.push(("path", input.path));
+    params.extend(page_params(input.per_page, input.page));
+    Ok(Request::get(with_query(
+        format!("{}/commits", repo_path(api, &input.owner, &input.repo)),
+        &params,
+    )))
+}
+
+fn plan_get_commit(api: &str, request: &ToolRequest) -> Result<Request, ConnectorError> {
+    let input: GetCommit = request.json()?;
+    Ok(Request::get(format!(
+        "{}/commits/{}",
+        repo_path(api, &input.owner, &input.repo),
+        encode(&input.ref_)
+    )))
+}
+
+fn plan_get_contents(api: &str, request: &ToolRequest) -> Result<Request, ConnectorError> {
+    let input: GetContents = request.json()?;
+    Ok(Request::get(with_query(
+        format!(
+            "{}/contents/{}",
+            repo_path(api, &input.owner, &input.repo),
+            encode_path(&input.path)
+        ),
+        &[("ref", input.ref_)],
+    )))
+}
+
+fn plan_create_or_update_file(api: &str, request: &ToolRequest) -> Result<Request, ConnectorError> {
+    let input: CreateOrUpdateFile = request.json()?;
+    let body = object(&[
+        ("message", Some(json!(input.message))),
+        ("content", Some(json!(input.content))),
+        ("sha", input.sha.as_ref().map(|sha| json!(sha))),
+        ("branch", input.branch.as_ref().map(|branch| json!(branch))),
+    ]);
+    Request::new(
+        Method::Put,
+        format!(
+            "{}/contents/{}",
+            repo_path(api, &input.owner, &input.repo),
+            encode_path(&input.path)
+        ),
+    )
+    .json(&body)
+}
+
+fn plan_delete_file(api: &str, request: &ToolRequest) -> Result<Request, ConnectorError> {
+    let input: DeleteFile = request.json()?;
+    let body = object(&[
+        ("message", Some(json!(input.message))),
+        ("sha", Some(json!(input.sha))),
+        ("branch", input.branch.as_ref().map(|branch| json!(branch))),
+    ]);
+    Request::new(
+        Method::Delete,
+        format!(
+            "{}/contents/{}",
+            repo_path(api, &input.owner, &input.repo),
+            encode_path(&input.path)
+        ),
+    )
+    .json(&body)
+}
+
+fn plan_list_issues(api: &str, request: &ToolRequest) -> Result<Request, ConnectorError> {
+    let input: ListIssues = request.json()?;
+    let mut params: Vec<(&str, Option<String>)> = Vec::with_capacity(4);
+    params.push(("state", input.state));
+    params.push(("labels", input.labels));
+    params.extend(page_params(input.per_page, input.page));
+    Ok(Request::get(with_query(
+        format!("{}/issues", repo_path(api, &input.owner, &input.repo)),
+        &params,
+    )))
+}
+
+fn plan_get_issue(api: &str, request: &ToolRequest) -> Result<Request, ConnectorError> {
+    let input: IssueRef = request.json()?;
+    Ok(Request::get(format!(
+        "{}/issues/{}",
+        repo_path(api, &input.owner, &input.repo),
+        input.issue_number
+    )))
+}
+
+fn plan_create_issue(api: &str, request: &ToolRequest) -> Result<Request, ConnectorError> {
+    let input: CreateIssue = request.json()?;
+    let body = object(&[
+        ("title", Some(json!(input.title))),
+        ("body", input.body.as_ref().map(|body| json!(body))),
+        ("labels", input.labels.as_ref().map(|labels| json!(labels))),
+        (
+            "assignees",
+            input.assignees.as_ref().map(|assignees| json!(assignees)),
+        ),
+    ]);
+    Request::post(format!(
+        "{}/issues",
+        repo_path(api, &input.owner, &input.repo)
+    ))
+    .json(&body)
+}
+
+fn plan_update_issue(api: &str, request: &ToolRequest) -> Result<Request, ConnectorError> {
+    let input: UpdateIssue = request.json()?;
+    let body = object(&[
+        ("title", input.title.as_ref().map(|title| json!(title))),
+        ("body", input.body.as_ref().map(|body| json!(body))),
+        ("state", input.state.as_ref().map(|state| json!(state))),
+        ("labels", input.labels.as_ref().map(|labels| json!(labels))),
+        (
+            "assignees",
+            input.assignees.as_ref().map(|assignees| json!(assignees)),
+        ),
+    ]);
+    Request::new(
+        Method::Patch,
+        format!(
+            "{}/issues/{}",
+            repo_path(api, &input.owner, &input.repo),
+            input.issue_number
+        ),
+    )
+    .json(&body)
+}
+
+fn plan_create_issue_comment(api: &str, request: &ToolRequest) -> Result<Request, ConnectorError> {
+    let input: CreateIssueComment = request.json()?;
+    let body = object(&[("body", Some(json!(input.body)))]);
+    Request::post(format!(
+        "{}/issues/{}/comments",
+        repo_path(api, &input.owner, &input.repo),
+        input.issue_number
+    ))
+    .json(&body)
+}
+
+fn plan_list_pulls(api: &str, request: &ToolRequest) -> Result<Request, ConnectorError> {
+    let input: ListPulls = request.json()?;
+    let mut params: Vec<(&str, Option<String>)> = Vec::with_capacity(5);
+    params.push(("state", input.state));
+    params.push(("head", input.head));
+    params.push(("base", input.base));
+    params.extend(page_params(input.per_page, input.page));
+    Ok(Request::get(with_query(
+        format!("{}/pulls", repo_path(api, &input.owner, &input.repo)),
+        &params,
+    )))
+}
+
+fn plan_get_pull(api: &str, request: &ToolRequest) -> Result<Request, ConnectorError> {
+    let input: PullRef = request.json()?;
+    Ok(Request::get(format!(
+        "{}/pulls/{}",
+        repo_path(api, &input.owner, &input.repo),
+        input.pull_number
+    )))
+}
+
+fn plan_create_pull(api: &str, request: &ToolRequest) -> Result<Request, ConnectorError> {
+    let input: CreatePull = request.json()?;
+    let body = object(&[
+        ("title", Some(json!(input.title))),
+        ("head", Some(json!(input.head))),
+        ("base", Some(json!(input.base))),
+        ("body", input.body.as_ref().map(|body| json!(body))),
+        ("draft", input.draft.map(|draft| json!(draft))),
+    ]);
+    Request::post(format!(
+        "{}/pulls",
+        repo_path(api, &input.owner, &input.repo)
+    ))
+    .json(&body)
+}
+
+fn plan_merge_pull(api: &str, request: &ToolRequest) -> Result<Request, ConnectorError> {
+    let input: MergePull = request.json()?;
+    let body = object(&[
+        (
+            "commit_title",
+            input.commit_title.as_ref().map(|title| json!(title)),
+        ),
+        (
+            "commit_message",
+            input.commit_message.as_ref().map(|message| json!(message)),
+        ),
+        (
+            "merge_method",
+            input.merge_method.as_ref().map(|method| json!(method)),
+        ),
+    ]);
+    Request::new(
+        Method::Put,
+        format!(
+            "{}/pulls/{}/merge",
+            repo_path(api, &input.owner, &input.repo),
+            input.pull_number
+        ),
+    )
+    .json(&body)
+}
+
+fn plan_get_authenticated_user(api: &str) -> Result<Request, ConnectorError> {
+    Ok(Request::get(format!("{api}/user")))
+}
+
+fn plan_list_workflow_runs(api: &str, request: &ToolRequest) -> Result<Request, ConnectorError> {
+    let input: ListWorkflowRuns = request.json()?;
+    let mut params: Vec<(&str, Option<String>)> = Vec::with_capacity(3);
+    params.push(("status", input.status));
+    params.extend(page_params(input.per_page, input.page));
+    Ok(Request::get(with_query(
+        format!("{}/actions/runs", repo_path(api, &input.owner, &input.repo)),
+        &params,
+    )))
+}
 /// Appends the `Some` query parameters to `url`, percent-encoding each value.
 fn with_query(url: String, params: &[(&str, Option<String>)]) -> String {
     let query: Vec<String> = params
@@ -578,7 +589,6 @@ mod tests {
         ToolRequest {
             tool: tool.into(),
             body: body.into(),
-            ..ToolRequest::default()
         }
     }
 

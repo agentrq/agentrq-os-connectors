@@ -224,354 +224,28 @@ fn project(input: &str) -> String {
 fn outgoing(base: &str, request: &ToolRequest) -> Result<Request, ConnectorError> {
     let api = base.trim_end_matches('/');
     let outgoing = match request.tool.as_str() {
-        "getProject" => {
-            let input: ProjectRef = request.json()?;
-            Request::get(format!("{api}/projects/{}", project(&input.project_id)))
-        }
-        "listProjects" => {
-            let input: ListProjects = request.json()?;
-            Request::get(with_query(
-                format!("{api}/projects"),
-                &[
-                    ("archived", input.archived.map(|b| b.to_string())),
-                    ("visibility", input.visibility),
-                    ("order_by", input.order_by),
-                    ("sort", input.sort),
-                    ("search", input.search),
-                    ("owned", input.owned.map(|b| b.to_string())),
-                    ("membership", input.membership.map(|b| b.to_string())),
-                    ("starred", input.starred.map(|b| b.to_string())),
-                    ("per_page", input.per_page.map(|n| n.to_string())),
-                    ("page", input.page.map(|n| n.to_string())),
-                ],
-            ))
-        }
-        "createProject" => {
-            let input: CreateProject = request.json()?;
-            let body = object(&[
-                ("name", Some(json!(input.name))),
-                ("path", input.path.as_ref().map(|path| json!(path))),
-                (
-                    "description",
-                    input
-                        .description
-                        .as_ref()
-                        .map(|description| json!(description)),
-                ),
-                (
-                    "visibility",
-                    input
-                        .visibility
-                        .as_ref()
-                        .map(|visibility| json!(visibility)),
-                ),
-                (
-                    "initialize_with_readme",
-                    input
-                        .initialize_with_readme
-                        .map(|initialize| json!(initialize)),
-                ),
-            ]);
-            Request::post(format!("{api}/projects")).json(&body)?
-        }
-        "listBranches" => {
-            let input: ListBranches = request.json()?;
-            Request::get(with_query(
-                format!(
-                    "{api}/projects/{}/repository/branches",
-                    project(&input.project_id)
-                ),
-                &[
-                    ("search", input.search),
-                    ("per_page", input.per_page.map(|n| n.to_string())),
-                    ("page", input.page.map(|n| n.to_string())),
-                ],
-            ))
-        }
-        "listCommits" => {
-            let input: ListCommits = request.json()?;
-            Request::get(with_query(
-                format!(
-                    "{api}/projects/{}/repository/commits",
-                    project(&input.project_id)
-                ),
-                &[
-                    ("ref_name", input.ref_name),
-                    ("path", input.path),
-                    ("per_page", input.per_page.map(|n| n.to_string())),
-                    ("page", input.page.map(|n| n.to_string())),
-                ],
-            ))
-        }
-        "getCommit" => {
-            let input: GetCommit = request.json()?;
-            Request::get(format!(
-                "{api}/projects/{}/repository/commits/{}",
-                project(&input.project_id),
-                encode(&input.sha)
-            ))
-        }
-        "getFile" => {
-            let input: GetFile = request.json()?;
-            Request::get(with_query(
-                format!(
-                    "{api}/projects/{}/repository/files/{}",
-                    project(&input.project_id),
-                    encode(&input.file_path)
-                ),
-                &[("ref", input.ref_)],
-            ))
-        }
-        "listRepositoryTree" => {
-            let input: ListRepositoryTree = request.json()?;
-            Request::get(with_query(
-                format!(
-                    "{api}/projects/{}/repository/tree",
-                    project(&input.project_id)
-                ),
-                &[
-                    ("path", input.path),
-                    ("ref", input.ref_),
-                    ("recursive", input.recursive.map(|b| b.to_string())),
-                    ("per_page", input.per_page.map(|n| n.to_string())),
-                    ("page", input.page.map(|n| n.to_string())),
-                ],
-            ))
-        }
-        "createFile" => {
-            let input: CreateFile = request.json()?;
-            let body = object(&[
-                ("branch", Some(json!(input.branch))),
-                ("commit_message", Some(json!(input.commit_message))),
-                ("content", Some(json!(input.content))),
-                (
-                    "encoding",
-                    input.encoding.as_ref().map(|encoding| json!(encoding)),
-                ),
-            ]);
-            Request::post(format!(
-                "{api}/projects/{}/repository/files/{}",
-                project(&input.project_id),
-                encode(&input.file_path)
-            ))
-            .json(&body)?
-        }
-        "updateFile" => {
-            let input: UpdateFile = request.json()?;
-            let body = object(&[
-                ("branch", Some(json!(input.branch))),
-                ("commit_message", Some(json!(input.commit_message))),
-                ("content", Some(json!(input.content))),
-                (
-                    "encoding",
-                    input.encoding.as_ref().map(|encoding| json!(encoding)),
-                ),
-                (
-                    "last_commit_id",
-                    input.last_commit_id.as_ref().map(|commit| json!(commit)),
-                ),
-            ]);
-            Request::new(
-                Method::Put,
-                format!(
-                    "{api}/projects/{}/repository/files/{}",
-                    project(&input.project_id),
-                    encode(&input.file_path)
-                ),
-            )
-            .json(&body)?
-        }
-        "deleteFile" => {
-            let input: DeleteFile = request.json()?;
-            let body = object(&[
-                ("branch", Some(json!(input.branch))),
-                ("commit_message", Some(json!(input.commit_message))),
-            ]);
-            Request::new(
-                Method::Delete,
-                format!(
-                    "{api}/projects/{}/repository/files/{}",
-                    project(&input.project_id),
-                    encode(&input.file_path)
-                ),
-            )
-            .json(&body)?
-        }
-        "listIssues" => {
-            let input: ListIssues = request.json()?;
-            Request::get(with_query(
-                format!("{api}/projects/{}/issues", project(&input.project_id)),
-                &[
-                    ("state", input.state),
-                    ("labels", input.labels),
-                    ("per_page", input.per_page.map(|n| n.to_string())),
-                    ("page", input.page.map(|n| n.to_string())),
-                ],
-            ))
-        }
-        "getIssue" => {
-            let input: IssueRef = request.json()?;
-            Request::get(format!(
-                "{api}/projects/{}/issues/{}",
-                project(&input.project_id),
-                input.issue_iid
-            ))
-        }
-        "createIssue" => {
-            let input: CreateIssue = request.json()?;
-            let body = object(&[
-                ("title", Some(json!(input.title))),
-                (
-                    "description",
-                    input
-                        .description
-                        .as_ref()
-                        .map(|description| json!(description)),
-                ),
-                ("labels", input.labels.as_ref().map(|labels| json!(labels))),
-                (
-                    "assignee_ids",
-                    input
-                        .assignee_ids
-                        .as_ref()
-                        .map(|assignees| json!(assignees)),
-                ),
-            ]);
-            Request::post(format!(
-                "{api}/projects/{}/issues",
-                project(&input.project_id)
-            ))
-            .json(&body)?
-        }
-        "updateIssue" => {
-            let input: UpdateIssue = request.json()?;
-            let body = object(&[
-                ("title", input.title.as_ref().map(|title| json!(title))),
-                (
-                    "description",
-                    input
-                        .description
-                        .as_ref()
-                        .map(|description| json!(description)),
-                ),
-                (
-                    "state_event",
-                    input.state_event.as_ref().map(|event| json!(event)),
-                ),
-                ("labels", input.labels.as_ref().map(|labels| json!(labels))),
-                (
-                    "assignee_ids",
-                    input
-                        .assignee_ids
-                        .as_ref()
-                        .map(|assignees| json!(assignees)),
-                ),
-            ]);
-            Request::new(
-                Method::Put,
-                format!(
-                    "{api}/projects/{}/issues/{}",
-                    project(&input.project_id),
-                    input.issue_iid
-                ),
-            )
-            .json(&body)?
-        }
-        "createIssueNote" => {
-            let input: CreateIssueNote = request.json()?;
-            let body = object(&[("body", Some(json!(input.body)))]);
-            Request::post(format!(
-                "{api}/projects/{}/issues/{}/notes",
-                project(&input.project_id),
-                input.issue_iid
-            ))
-            .json(&body)?
-        }
-        "listMergeRequests" => {
-            let input: ListMergeRequests = request.json()?;
-            Request::get(with_query(
-                format!(
-                    "{api}/projects/{}/merge_requests",
-                    project(&input.project_id)
-                ),
-                &[
-                    ("state", input.state),
-                    ("source_branch", input.source_branch),
-                    ("target_branch", input.target_branch),
-                    ("per_page", input.per_page.map(|n| n.to_string())),
-                    ("page", input.page.map(|n| n.to_string())),
-                ],
-            ))
-        }
-        "getMergeRequest" => {
-            let input: MergeRequestRef = request.json()?;
-            Request::get(format!(
-                "{api}/projects/{}/merge_requests/{}",
-                project(&input.project_id),
-                input.merge_request_iid
-            ))
-        }
-        "createMergeRequest" => {
-            let input: CreateMergeRequest = request.json()?;
-            let body = object(&[
-                ("title", Some(json!(input.title))),
-                ("source_branch", Some(json!(input.source_branch))),
-                ("target_branch", Some(json!(input.target_branch))),
-                (
-                    "description",
-                    input
-                        .description
-                        .as_ref()
-                        .map(|description| json!(description)),
-                ),
-            ]);
-            Request::post(format!(
-                "{api}/projects/{}/merge_requests",
-                project(&input.project_id)
-            ))
-            .json(&body)?
-        }
-        "acceptMergeRequest" => {
-            let input: AcceptMergeRequest = request.json()?;
-            let body = object(&[
-                (
-                    "merge_commit_message",
-                    input
-                        .merge_commit_message
-                        .as_ref()
-                        .map(|message| json!(message)),
-                ),
-                ("squash", input.squash.map(|squash| json!(squash))),
-                (
-                    "should_remove_source_branch",
-                    input
-                        .should_remove_source_branch
-                        .map(|remove| json!(remove)),
-                ),
-            ]);
-            Request::new(
-                Method::Put,
-                format!(
-                    "{api}/projects/{}/merge_requests/{}/merge",
-                    project(&input.project_id),
-                    input.merge_request_iid
-                ),
-            )
-            .json(&body)?
-        }
-        "getCurrentUser" => Request::get(format!("{api}/user")),
-        "listPipelines" => {
-            let input: ListPipelines = request.json()?;
-            Request::get(with_query(
-                format!("{api}/projects/{}/pipelines", project(&input.project_id)),
-                &[
-                    ("status", input.status),
-                    ("ref", input.ref_),
-                    ("per_page", input.per_page.map(|n| n.to_string())),
-                    ("page", input.page.map(|n| n.to_string())),
-                ],
-            ))
-        }
+        "getProject" => plan_get_project(api, request)?,
+        "listProjects" => plan_list_projects(api, request)?,
+        "createProject" => plan_create_project(api, request)?,
+        "listBranches" => plan_list_branches(api, request)?,
+        "listCommits" => plan_list_commits(api, request)?,
+        "getCommit" => plan_get_commit(api, request)?,
+        "getFile" => plan_get_file(api, request)?,
+        "listRepositoryTree" => plan_list_repository_tree(api, request)?,
+        "createFile" => plan_create_file(api, request)?,
+        "updateFile" => plan_update_file(api, request)?,
+        "deleteFile" => plan_delete_file(api, request)?,
+        "listIssues" => plan_list_issues(api, request)?,
+        "getIssue" => plan_get_issue(api, request)?,
+        "createIssue" => plan_create_issue(api, request)?,
+        "updateIssue" => plan_update_issue(api, request)?,
+        "createIssueNote" => plan_create_issue_note(api, request)?,
+        "listMergeRequests" => plan_list_merge_requests(api, request)?,
+        "getMergeRequest" => plan_get_merge_request(api, request)?,
+        "createMergeRequest" => plan_create_merge_request(api, request)?,
+        "acceptMergeRequest" => plan_accept_merge_request(api, request)?,
+        "getCurrentUser" => plan_get_current_user(api)?,
+        "listPipelines" => plan_list_pipelines(api, request)?,
         other => return Err(ConnectorError::NotFound(format!("no tool {other}"))),
     };
     Ok(outgoing.header(
@@ -580,6 +254,363 @@ fn outgoing(base: &str, request: &ToolRequest) -> Result<Request, ConnectorError
     ))
 }
 
+/// `{api}/projects/{id}`: a numeric ID passes through, a `namespace/project`
+/// path is URL-encoded the way the API requires.
+fn project_path(api: &str, project_id: &str) -> String {
+    format!("{api}/projects/{}", project(project_id))
+}
+
+/// The `per_page`/`page` query pair shared by every listing tool.
+fn page_params(per_page: Option<u32>, page: Option<u32>) -> [(&'static str, Option<String>); 2] {
+    [
+        ("per_page", per_page.map(|n| n.to_string())),
+        ("page", page.map(|n| n.to_string())),
+    ]
+}
+
+/// `{project}/repository/files/{path}`, with the file path percent-encoded.
+fn file_path(api: &str, project_id: &str, file_path: &str) -> String {
+    format!(
+        "{}/repository/files/{}",
+        project_path(api, project_id),
+        encode(file_path)
+    )
+}
+
+fn plan_get_project(api: &str, request: &ToolRequest) -> Result<Request, ConnectorError> {
+    let input: ProjectRef = request.json()?;
+    Ok(Request::get(project_path(api, &input.project_id)))
+}
+
+fn plan_list_projects(api: &str, request: &ToolRequest) -> Result<Request, ConnectorError> {
+    let input: ListProjects = request.json()?;
+    let mut params: Vec<(&str, Option<String>)> = Vec::with_capacity(10);
+    params.push(("archived", input.archived.map(|b| b.to_string())));
+    params.push(("visibility", input.visibility));
+    params.push(("order_by", input.order_by));
+    params.push(("sort", input.sort));
+    params.push(("search", input.search));
+    params.push(("owned", input.owned.map(|b| b.to_string())));
+    params.push(("membership", input.membership.map(|b| b.to_string())));
+    params.push(("starred", input.starred.map(|b| b.to_string())));
+    params.extend(page_params(input.per_page, input.page));
+    Ok(Request::get(with_query(format!("{api}/projects"), &params)))
+}
+
+fn plan_create_project(api: &str, request: &ToolRequest) -> Result<Request, ConnectorError> {
+    let input: CreateProject = request.json()?;
+    let body = object(&[
+        ("name", Some(json!(input.name))),
+        ("path", input.path.as_ref().map(|path| json!(path))),
+        (
+            "description",
+            input
+                .description
+                .as_ref()
+                .map(|description| json!(description)),
+        ),
+        (
+            "visibility",
+            input
+                .visibility
+                .as_ref()
+                .map(|visibility| json!(visibility)),
+        ),
+        (
+            "initialize_with_readme",
+            input
+                .initialize_with_readme
+                .map(|initialize| json!(initialize)),
+        ),
+    ]);
+    Request::post(format!("{api}/projects")).json(&body)
+}
+
+fn plan_list_branches(api: &str, request: &ToolRequest) -> Result<Request, ConnectorError> {
+    let input: ListBranches = request.json()?;
+    let mut params: Vec<(&str, Option<String>)> = Vec::with_capacity(3);
+    params.push(("search", input.search));
+    params.extend(page_params(input.per_page, input.page));
+    Ok(Request::get(with_query(
+        format!(
+            "{}/repository/branches",
+            project_path(api, &input.project_id)
+        ),
+        &params,
+    )))
+}
+
+fn plan_list_commits(api: &str, request: &ToolRequest) -> Result<Request, ConnectorError> {
+    let input: ListCommits = request.json()?;
+    let mut params: Vec<(&str, Option<String>)> = Vec::with_capacity(4);
+    params.push(("ref_name", input.ref_name));
+    params.push(("path", input.path));
+    params.extend(page_params(input.per_page, input.page));
+    Ok(Request::get(with_query(
+        format!(
+            "{}/repository/commits",
+            project_path(api, &input.project_id)
+        ),
+        &params,
+    )))
+}
+
+fn plan_get_commit(api: &str, request: &ToolRequest) -> Result<Request, ConnectorError> {
+    let input: GetCommit = request.json()?;
+    Ok(Request::get(format!(
+        "{}/repository/commits/{}",
+        project_path(api, &input.project_id),
+        encode(&input.sha)
+    )))
+}
+
+fn plan_get_file(api: &str, request: &ToolRequest) -> Result<Request, ConnectorError> {
+    let input: GetFile = request.json()?;
+    Ok(Request::get(with_query(
+        file_path(api, &input.project_id, &input.file_path),
+        &[("ref", input.ref_)],
+    )))
+}
+
+fn plan_list_repository_tree(api: &str, request: &ToolRequest) -> Result<Request, ConnectorError> {
+    let input: ListRepositoryTree = request.json()?;
+    let mut params: Vec<(&str, Option<String>)> = Vec::with_capacity(5);
+    params.push(("path", input.path));
+    params.push(("ref", input.ref_));
+    params.push(("recursive", input.recursive.map(|b| b.to_string())));
+    params.extend(page_params(input.per_page, input.page));
+    Ok(Request::get(with_query(
+        format!("{}/repository/tree", project_path(api, &input.project_id)),
+        &params,
+    )))
+}
+
+fn plan_create_file(api: &str, request: &ToolRequest) -> Result<Request, ConnectorError> {
+    let input: CreateFile = request.json()?;
+    let body = object(&[
+        ("branch", Some(json!(input.branch))),
+        ("commit_message", Some(json!(input.commit_message))),
+        ("content", Some(json!(input.content))),
+        (
+            "encoding",
+            input.encoding.as_ref().map(|encoding| json!(encoding)),
+        ),
+    ]);
+    Request::post(file_path(api, &input.project_id, &input.file_path)).json(&body)
+}
+
+fn plan_update_file(api: &str, request: &ToolRequest) -> Result<Request, ConnectorError> {
+    let input: UpdateFile = request.json()?;
+    let body = object(&[
+        ("branch", Some(json!(input.branch))),
+        ("commit_message", Some(json!(input.commit_message))),
+        ("content", Some(json!(input.content))),
+        (
+            "encoding",
+            input.encoding.as_ref().map(|encoding| json!(encoding)),
+        ),
+        (
+            "last_commit_id",
+            input.last_commit_id.as_ref().map(|commit| json!(commit)),
+        ),
+    ]);
+    Request::new(
+        Method::Put,
+        file_path(api, &input.project_id, &input.file_path),
+    )
+    .json(&body)
+}
+
+fn plan_delete_file(api: &str, request: &ToolRequest) -> Result<Request, ConnectorError> {
+    let input: DeleteFile = request.json()?;
+    let body = object(&[
+        ("branch", Some(json!(input.branch))),
+        ("commit_message", Some(json!(input.commit_message))),
+    ]);
+    Request::new(
+        Method::Delete,
+        file_path(api, &input.project_id, &input.file_path),
+    )
+    .json(&body)
+}
+
+fn plan_list_issues(api: &str, request: &ToolRequest) -> Result<Request, ConnectorError> {
+    let input: ListIssues = request.json()?;
+    let mut params: Vec<(&str, Option<String>)> = Vec::with_capacity(4);
+    params.push(("state", input.state));
+    params.push(("labels", input.labels));
+    params.extend(page_params(input.per_page, input.page));
+    Ok(Request::get(with_query(
+        format!("{}/issues", project_path(api, &input.project_id)),
+        &params,
+    )))
+}
+
+fn plan_get_issue(api: &str, request: &ToolRequest) -> Result<Request, ConnectorError> {
+    let input: IssueRef = request.json()?;
+    Ok(Request::get(format!(
+        "{}/issues/{}",
+        project_path(api, &input.project_id),
+        input.issue_iid
+    )))
+}
+
+fn plan_create_issue(api: &str, request: &ToolRequest) -> Result<Request, ConnectorError> {
+    let input: CreateIssue = request.json()?;
+    let body = object(&[
+        ("title", Some(json!(input.title))),
+        (
+            "description",
+            input
+                .description
+                .as_ref()
+                .map(|description| json!(description)),
+        ),
+        ("labels", input.labels.as_ref().map(|labels| json!(labels))),
+        (
+            "assignee_ids",
+            input
+                .assignee_ids
+                .as_ref()
+                .map(|assignees| json!(assignees)),
+        ),
+    ]);
+    Request::post(format!("{}/issues", project_path(api, &input.project_id))).json(&body)
+}
+
+fn plan_update_issue(api: &str, request: &ToolRequest) -> Result<Request, ConnectorError> {
+    let input: UpdateIssue = request.json()?;
+    let body = object(&[
+        ("title", input.title.as_ref().map(|title| json!(title))),
+        (
+            "description",
+            input
+                .description
+                .as_ref()
+                .map(|description| json!(description)),
+        ),
+        (
+            "state_event",
+            input.state_event.as_ref().map(|event| json!(event)),
+        ),
+        ("labels", input.labels.as_ref().map(|labels| json!(labels))),
+        (
+            "assignee_ids",
+            input
+                .assignee_ids
+                .as_ref()
+                .map(|assignees| json!(assignees)),
+        ),
+    ]);
+    Request::new(
+        Method::Put,
+        format!(
+            "{}/issues/{}",
+            project_path(api, &input.project_id),
+            input.issue_iid
+        ),
+    )
+    .json(&body)
+}
+
+fn plan_create_issue_note(api: &str, request: &ToolRequest) -> Result<Request, ConnectorError> {
+    let input: CreateIssueNote = request.json()?;
+    let body = object(&[("body", Some(json!(input.body)))]);
+    Request::post(format!(
+        "{}/issues/{}/notes",
+        project_path(api, &input.project_id),
+        input.issue_iid
+    ))
+    .json(&body)
+}
+
+fn plan_list_merge_requests(api: &str, request: &ToolRequest) -> Result<Request, ConnectorError> {
+    let input: ListMergeRequests = request.json()?;
+    let mut params: Vec<(&str, Option<String>)> = Vec::with_capacity(5);
+    params.push(("state", input.state));
+    params.push(("source_branch", input.source_branch));
+    params.push(("target_branch", input.target_branch));
+    params.extend(page_params(input.per_page, input.page));
+    Ok(Request::get(with_query(
+        format!("{}/merge_requests", project_path(api, &input.project_id)),
+        &params,
+    )))
+}
+
+fn plan_get_merge_request(api: &str, request: &ToolRequest) -> Result<Request, ConnectorError> {
+    let input: MergeRequestRef = request.json()?;
+    Ok(Request::get(format!(
+        "{}/merge_requests/{}",
+        project_path(api, &input.project_id),
+        input.merge_request_iid
+    )))
+}
+
+fn plan_create_merge_request(api: &str, request: &ToolRequest) -> Result<Request, ConnectorError> {
+    let input: CreateMergeRequest = request.json()?;
+    let body = object(&[
+        ("title", Some(json!(input.title))),
+        ("source_branch", Some(json!(input.source_branch))),
+        ("target_branch", Some(json!(input.target_branch))),
+        (
+            "description",
+            input
+                .description
+                .as_ref()
+                .map(|description| json!(description)),
+        ),
+    ]);
+    Request::post(format!(
+        "{}/merge_requests",
+        project_path(api, &input.project_id)
+    ))
+    .json(&body)
+}
+
+fn plan_accept_merge_request(api: &str, request: &ToolRequest) -> Result<Request, ConnectorError> {
+    let input: AcceptMergeRequest = request.json()?;
+    let body = object(&[
+        (
+            "merge_commit_message",
+            input
+                .merge_commit_message
+                .as_ref()
+                .map(|message| json!(message)),
+        ),
+        ("squash", input.squash.map(|squash| json!(squash))),
+        (
+            "should_remove_source_branch",
+            input
+                .should_remove_source_branch
+                .map(|remove| json!(remove)),
+        ),
+    ]);
+    Request::new(
+        Method::Put,
+        format!(
+            "{}/merge_requests/{}/merge",
+            project_path(api, &input.project_id),
+            input.merge_request_iid
+        ),
+    )
+    .json(&body)
+}
+
+fn plan_get_current_user(api: &str) -> Result<Request, ConnectorError> {
+    Ok(Request::get(format!("{api}/user")))
+}
+
+fn plan_list_pipelines(api: &str, request: &ToolRequest) -> Result<Request, ConnectorError> {
+    let input: ListPipelines = request.json()?;
+    let mut params: Vec<(&str, Option<String>)> = Vec::with_capacity(4);
+    params.push(("status", input.status));
+    params.push(("ref", input.ref_));
+    params.extend(page_params(input.per_page, input.page));
+    Ok(Request::get(with_query(
+        format!("{}/pipelines", project_path(api, &input.project_id)),
+        &params,
+    )))
+}
 /// Appends the `Some` query parameters to `url`, percent-encoding each value.
 fn with_query(url: String, params: &[(&str, Option<String>)]) -> String {
     let query: Vec<String> = params
@@ -643,7 +674,6 @@ mod tests {
         ToolRequest {
             tool: tool.into(),
             body: body.into(),
-            ..ToolRequest::default()
         }
     }
 

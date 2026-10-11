@@ -53,18 +53,18 @@ fn outgoing(base: &str, request: &ToolRequest) -> Result<Request, ConnectorError
     let outgoing = match request.tool.as_str() {
         "getDocument" => {
             let input: GetDocument = request.json()?;
-            let mut url = format!("{}/{}", api, encode(&input.document_id));
-            let mut query = Vec::new();
-            if let Some(mode) = input.suggestions_view_mode {
-                query.push(format!("suggestionsViewMode={}", encode(&mode)));
-            }
-            if let Some(include) = input.include_tabs_content {
-                query.push(format!("includeTabsContent={include}"));
-            }
-            if !query.is_empty() {
-                url = format!("{}?{}", url, query.join("&"));
-            }
-            Request::get(url)
+            Request::get(with_query(
+                &format!("{}/{}", api, encode(&input.document_id)),
+                &[
+                    ("suggestionsViewMode", input.suggestions_view_mode),
+                    (
+                        "includeTabsContent",
+                        input
+                            .include_tabs_content
+                            .map(|include| include.to_string()),
+                    ),
+                ],
+            ))
         }
         "createDocument" => {
             let input: CreateDocument = request.json()?;
@@ -99,6 +99,23 @@ fn answer(response: &Response) -> Result<ToolResponse, ConnectorError> {
     ToolResponse::structured(&body)
 }
 
+/// Appends the present query parameters to `url`, percent-encoding each value.
+fn with_query(url: &str, params: &[(&str, Option<String>)]) -> String {
+    let query: Vec<String> = params
+        .iter()
+        .filter_map(|(name, value)| {
+            value
+                .as_deref()
+                .map(|value| format!("{name}={}", encode(value)))
+        })
+        .collect();
+    if query.is_empty() {
+        url.to_string()
+    } else {
+        format!("{url}?{}", query.join("&"))
+    }
+}
+
 /// Percent-encodes a path segment or query value.
 fn encode(text: &str) -> String {
     text.bytes()
@@ -119,7 +136,6 @@ mod tests {
         ToolRequest {
             tool: tool.into(),
             body: body.into(),
-            ..ToolRequest::default()
         }
     }
 

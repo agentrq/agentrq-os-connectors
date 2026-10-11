@@ -3,7 +3,7 @@
 //! refreshes the token and adds `Authorization: Bearer â¦` after each request
 //! leaves the guest: this code never sees it.
 
-use connectors_sdk::http::{Request, Response};
+use connectors_sdk::http::{Method, Request, Response};
 use connectors_sdk::{Connector, ConnectorError, ToolRequest, ToolResponse, host};
 use serde::Deserialize;
 use serde_json::{Value, json};
@@ -76,30 +76,20 @@ fn outgoing(base: &str, request: &ToolRequest) -> Result<Request, ConnectorError
     let outgoing = match request.tool.as_str() {
         "listEvents" => {
             let input: ListEvents = request.json()?;
-            let mut url = format!("{}/{}/events", api, encode(&input.calendar_id));
-            let mut query = Vec::new();
-            if let Some(v) = input.time_min {
-                query.push(format!("timeMin={}", encode(&v)));
-            }
-            if let Some(v) = input.time_max {
-                query.push(format!("timeMax={}", encode(&v)));
-            }
-            if let Some(v) = input.q {
-                query.push(format!("q={}", encode(&v)));
-            }
-            if let Some(v) = input.max_results {
-                query.push(format!("maxResults={v}"));
-            }
-            if let Some(v) = input.single_events {
-                query.push(format!("singleEvents={v}"));
-            }
-            if let Some(v) = input.order_by {
-                query.push(format!("orderBy={}", encode(&v)));
-            }
-            if !query.is_empty() {
-                url = format!("{}?{}", url, query.join("&"));
-            }
-            Request::get(url)
+            Request::get(with_query(
+                &format!("{}/{}/events", api, encode(&input.calendar_id)),
+                &[
+                    ("timeMin", input.time_min),
+                    ("timeMax", input.time_max),
+                    ("q", input.q),
+                    ("maxResults", input.max_results.map(|n| n.to_string())),
+                    (
+                        "singleEvents",
+                        input.single_events.map(|single| single.to_string()),
+                    ),
+                    ("orderBy", input.order_by),
+                ],
+            ))
         }
         "getEvent" => {
             let input: GetEvent = request.json()?;
@@ -112,37 +102,37 @@ fn outgoing(base: &str, request: &ToolRequest) -> Result<Request, ConnectorError
         }
         "createEvent" => {
             let input: CreateEvent = request.json()?;
-            let mut url = format!("{}/{}/events", api, encode(&input.calendar_id));
-            if let Some(v) = input.send_updates {
-                url = format!("{}?sendUpdates={}", url, encode(&v));
-            }
+            let url = with_query(
+                &format!("{}/{}/events", api, encode(&input.calendar_id)),
+                &[("sendUpdates", input.send_updates)],
+            );
             Request::post(url).json(&input.event)?
         }
         "updateEvent" => {
             let input: UpdateEvent = request.json()?;
-            let mut url = format!(
-                "{}/{}/events/{}",
-                api,
-                encode(&input.calendar_id),
-                encode(&input.event_id)
+            let url = with_query(
+                &format!(
+                    "{}/{}/events/{}",
+                    api,
+                    encode(&input.calendar_id),
+                    encode(&input.event_id)
+                ),
+                &[("sendUpdates", input.send_updates)],
             );
-            if let Some(v) = input.send_updates {
-                url = format!("{}?sendUpdates={}", url, encode(&v));
-            }
-            Request::new(connectors_sdk::http::Method::Patch, url).json(&input.event)?
+            Request::new(Method::Patch, url).json(&input.event)?
         }
         "deleteEvent" => {
             let input: DeleteEvent = request.json()?;
-            let mut url = format!(
-                "{}/{}/events/{}",
-                api,
-                encode(&input.calendar_id),
-                encode(&input.event_id)
+            let url = with_query(
+                &format!(
+                    "{}/{}/events/{}",
+                    api,
+                    encode(&input.calendar_id),
+                    encode(&input.event_id)
+                ),
+                &[("sendUpdates", input.send_updates)],
             );
-            if let Some(v) = input.send_updates {
-                url = format!("{}?sendUpdates={}", url, encode(&v));
-            }
-            Request::new(connectors_sdk::http::Method::Delete, url)
+            Request::new(Method::Delete, url)
         }
         other => return Err(ConnectorError::NotFound(format!("no tool {other}"))),
     };
@@ -167,6 +157,23 @@ fn answer(response: &Response) -> Result<ToolResponse, ConnectorError> {
     ToolResponse::structured(&body)
 }
 
+/// Appends the present query parameters to `url`, percent-encoding each value.
+fn with_query(url: &str, params: &[(&str, Option<String>)]) -> String {
+    let query: Vec<String> = params
+        .iter()
+        .filter_map(|(name, value)| {
+            value
+                .as_deref()
+                .map(|value| format!("{name}={}", encode(value)))
+        })
+        .collect();
+    if query.is_empty() {
+        url.to_string()
+    } else {
+        format!("{url}?{}", query.join("&"))
+    }
+}
+
 /// Percent-encodes a path segment or query value.
 fn encode(text: &str) -> String {
     text.bytes()
@@ -187,7 +194,6 @@ mod tests {
         ToolRequest {
             tool: tool.into(),
             body: body.into(),
-            ..ToolRequest::default()
         }
     }
 
