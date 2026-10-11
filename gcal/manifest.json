@@ -283,5 +283,6 @@
     }
   ],
   "version": "0.2.0",
-  "websiteUrl": "https://developers.google.com/workspace/calendar/api"
+  "websiteUrl": "https://developers.google.com/workspace/calendar/api",
+  "instructions": "listEvents with timeMin/timeMax and a query finds events; getEvent returns one event's full details. createEvent takes dateTime with offset or a plain date for all-day events, and sendUpdates notifies guests; updateEvent patches only the given fields. For scheduling, prefer findFreeTime over hand-rolled interval math: give it a window and durationMinutes and it returns free slots across the searched calendars, with busy blocks merged and API errors surfaced as tool errors rather than silent free time."
 }
