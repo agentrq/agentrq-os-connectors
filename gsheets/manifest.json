@@ -22,7 +22,7 @@
       }
     ]
   },
-  "description": "Read, write and manage Google Sheets: read ranges, update cells, append rows, clear ranges, create spreadsheets, inspect structure, and batch updates.",
+  "description": "Read, write and manage Google Sheets with task-shaped tools: read ranges or whole tables, update cells, append rows, clear ranges, create spreadsheets with their initial data, inspect structure, and batch updates.",
   "icons": [
     {
       "src": "https://raw.githubusercontent.com/agentrq/agentrq-os-connectors/main/gsheets/icon.svg",
@@ -91,6 +91,42 @@
       },
       "name": "getValues",
       "title": "Read a range"
+    },
+    {
+      "annotations": {
+        "idempotentHint": true,
+        "openWorldHint": true,
+        "readOnlyHint": true
+      },
+      "description": "Read a range as a table: the first row becomes headers, the rest become objects",
+      "inputSchema": {
+        "additionalProperties": false,
+        "properties": {
+          "majorDimension": {
+            "description": "ROWS or COLUMNS",
+            "type": "string"
+          },
+          "range": {
+            "description": "A1 notation of the table range, e.g. Sheet1!A1:D",
+            "type": "string"
+          },
+          "spreadsheetId": {
+            "description": "The spreadsheet's ID",
+            "type": "string"
+          },
+          "valueRenderOption": {
+            "description": "FORMATTED_VALUE, UNFORMATTED_VALUE or FORMULA",
+            "type": "string"
+          }
+        },
+        "required": [
+          "spreadsheetId",
+          "range"
+        ],
+        "type": "object"
+      },
+      "name": "readTable",
+      "title": "Read a table"
     },
     {
       "annotations": {
@@ -211,10 +247,35 @@
         "openWorldHint": true,
         "readOnlyHint": false
       },
-      "description": "Create a new spreadsheet with the given title",
+      "description": "Create a spreadsheet, optionally with named sheets and their initial rows",
       "inputSchema": {
         "additionalProperties": false,
         "properties": {
+          "sheets": {
+            "description": "Sheets to create; each may carry initial rows, written top-left",
+            "items": {
+              "additionalProperties": false,
+              "properties": {
+                "rows": {
+                  "description": "Initial rows for the sheet; each inner array is one row",
+                  "items": {
+                    "type": "array"
+                  },
+                  "type": "array"
+                },
+                "title": {
+                  "description": "Title of the sheet",
+                  "minLength": 1,
+                  "type": "string"
+                }
+              },
+              "required": [
+                "title"
+              ],
+              "type": "object"
+            },
+            "type": "array"
+          },
           "title": {
             "description": "Title of the new spreadsheet",
             "minLength": 1,
@@ -295,6 +356,6 @@
       "title": "Batch update"
     }
   ],
-  "version": "0.1.0",
+  "version": "0.2.0",
   "websiteUrl": "https://developers.google.com/workspace/sheets/api"
 }
