@@ -1,1 +1,18 @@
-{"$schema":"https://connectors.agentrq.com/schemas/connectors-manifest/v1.json","connectors":[{"manifest":"gsheets/manifest.json"},{"manifest":"gdocs/manifest.json"},{"manifest":"gcal/manifest.json"}],"manifestVersion":1}
+{
+  "$schema": "https://connectors.agentrq.com/schemas/connectors-manifest/v1.json",
+  "connectors": [
+    {
+      "manifest": "gsheets/manifest.json"
+    },
+    {
+      "manifest": "gdocs/manifest.json"
+    },
+    {
+      "manifest": "gcal/manifest.json"
+    },
+    {
+      "manifest": "github/manifest.json"
+    }
+  ],
+  "manifestVersion": 1
+}

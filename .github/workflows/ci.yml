@@ -12,7 +12,7 @@ jobs:
     strategy:
       fail-fast: true
       matrix:
-        connector: [gsheets, gdocs, gcal]
+        connector: [gsheets, gdocs, gcal, github]
     steps:
       - uses: actions/checkout@v4
 
