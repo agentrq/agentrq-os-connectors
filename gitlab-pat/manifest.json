@@ -8,7 +8,7 @@
       }
     ]
   },
-  "description": "Work with GitLab through the REST API: projects, branches, commits, files, issues, merge requests and pipelines.",
+  "description": "Work with GitLab through task-shaped tools, authenticated with a personal access token: propose multi-file changes as merge requests, read and write files, and manage projects, branches, commits, issues, merge requests and pipelines.",
   "icons": [
     {
       "mimeType": "image/svg+xml",
@@ -169,6 +169,149 @@
         "openWorldHint": true,
         "readOnlyHint": true
       },
+      "description": "Read a file's content as text at a branch, tag or commit; binary files come back base64-encoded with is_binary set",
+      "inputSchema": {
+        "additionalProperties": false,
+        "properties": {
+          "file_path": {
+            "description": "File path, e.g. src/lib.rs",
+            "type": "string"
+          },
+          "project_id": {
+            "description": "The project ID or URL-encoded path (namespace/project)",
+            "type": "string"
+          },
+          "ref": {
+            "description": "Branch, tag or commit SHA; the default branch when omitted",
+            "type": "string"
+          }
+        },
+        "required": [
+          "project_id",
+          "file_path"
+        ],
+        "type": "object"
+      },
+      "name": "readFile",
+      "title": "Read a file"
+    },
+    {
+      "annotations": {
+        "idempotentHint": true,
+        "openWorldHint": true,
+        "readOnlyHint": true
+      },
+      "description": "List a directory's files and subdirectories as name, path and type entries, optionally at a ref",
+      "inputSchema": {
+        "additionalProperties": false,
+        "properties": {
+          "path": {
+            "description": "Directory path; the repository root when omitted",
+            "type": "string"
+          },
+          "project_id": {
+            "description": "The project ID or URL-encoded path (namespace/project)",
+            "type": "string"
+          },
+          "ref": {
+            "description": "Branch, tag or commit SHA; the default branch when omitted",
+            "type": "string"
+          }
+        },
+        "required": [
+          "project_id"
+        ],
+        "type": "object"
+      },
+      "name": "listDirectory",
+      "title": "List a directory"
+    },
+    {
+      "annotations": {
+        "destructiveHint": false,
+        "openWorldHint": true,
+        "readOnlyHint": false
+      },
+      "description": "Create or update a file with plain-text content in one call: creates it when missing, updates it when present",
+      "inputSchema": {
+        "additionalProperties": false,
+        "properties": {
+          "branch": {
+            "description": "Branch to commit to",
+            "type": "string"
+          },
+          "commit_message": {
+            "description": "The commit message",
+            "type": "string"
+          },
+          "content": {
+            "description": "The new file content, as plain text",
+            "type": "string"
+          },
+          "file_path": {
+            "description": "File path, e.g. docs/notes.md",
+            "type": "string"
+          },
+          "project_id": {
+            "description": "The project ID or URL-encoded path (namespace/project)",
+            "type": "string"
+          }
+        },
+        "required": [
+          "project_id",
+          "file_path",
+          "branch",
+          "content",
+          "commit_message"
+        ],
+        "type": "object"
+      },
+      "name": "writeFile",
+      "title": "Write a file"
+    },
+    {
+      "annotations": {
+        "destructiveHint": true,
+        "openWorldHint": true,
+        "readOnlyHint": false
+      },
+      "description": "Delete a file from the repository",
+      "inputSchema": {
+        "additionalProperties": false,
+        "properties": {
+          "branch": {
+            "description": "Branch to commit to",
+            "type": "string"
+          },
+          "commit_message": {
+            "description": "The commit message",
+            "type": "string"
+          },
+          "file_path": {
+            "description": "File path, e.g. docs/notes.md",
+            "type": "string"
+          },
+          "project_id": {
+            "description": "The project ID or URL-encoded path (namespace/project)",
+            "type": "string"
+          }
+        },
+        "required": [
+          "project_id",
+          "file_path",
+          "branch"
+        ],
+        "type": "object"
+      },
+      "name": "deleteFile",
+      "title": "Delete a file"
+    },
+    {
+      "annotations": {
+        "idempotentHint": true,
+        "openWorldHint": true,
+        "readOnlyHint": true
+      },
       "description": "List a project's branches",
       "inputSchema": {
         "additionalProperties": false,
@@ -277,221 +420,6 @@
         "openWorldHint": true,
         "readOnlyHint": true
       },
-      "description": "Get a file's contents (base64) and metadata, optionally at a ref",
-      "inputSchema": {
-        "additionalProperties": false,
-        "properties": {
-          "file_path": {
-            "description": "File path, e.g. src/lib.rs",
-            "type": "string"
-          },
-          "project_id": {
-            "description": "The project ID or URL-encoded path (namespace/project)",
-            "type": "string"
-          },
-          "ref": {
-            "description": "Branch, tag or commit SHA; the default branch when omitted",
-            "type": "string"
-          }
-        },
-        "required": [
-          "project_id",
-          "file_path"
-        ],
-        "type": "object"
-      },
-      "name": "getFile",
-      "title": "Get a file"
-    },
-    {
-      "annotations": {
-        "idempotentHint": true,
-        "openWorldHint": true,
-        "readOnlyHint": true
-      },
-      "description": "List a directory's entries (files and subdirectories), optionally at a ref",
-      "inputSchema": {
-        "additionalProperties": false,
-        "properties": {
-          "page": {
-            "description": "Page number, starting at 1",
-            "minimum": 1,
-            "type": "integer"
-          },
-          "path": {
-            "description": "Directory path; the repository root when omitted",
-            "type": "string"
-          },
-          "per_page": {
-            "description": "Results per page, up to 100",
-            "maximum": 100,
-            "minimum": 1,
-            "type": "integer"
-          },
-          "project_id": {
-            "description": "The project ID or URL-encoded path (namespace/project)",
-            "type": "string"
-          },
-          "recursive": {
-            "description": "List all entries recursively",
-            "type": "boolean"
-          },
-          "ref": {
-            "description": "Branch, tag or commit SHA; the default branch when omitted",
-            "type": "string"
-          }
-        },
-        "required": [
-          "project_id"
-        ],
-        "type": "object"
-      },
-      "name": "listRepositoryTree",
-      "title": "List repository tree"
-    },
-    {
-      "annotations": {
-        "destructiveHint": false,
-        "idempotentHint": true,
-        "openWorldHint": true,
-        "readOnlyHint": false
-      },
-      "description": "Create a file in the repository",
-      "inputSchema": {
-        "additionalProperties": false,
-        "properties": {
-          "branch": {
-            "description": "Branch to commit to",
-            "type": "string"
-          },
-          "commit_message": {
-            "description": "The commit message",
-            "type": "string"
-          },
-          "content": {
-            "description": "The new file content",
-            "type": "string"
-          },
-          "encoding": {
-            "description": "text or base64; text when omitted",
-            "type": "string"
-          },
-          "file_path": {
-            "description": "File path, e.g. docs/notes.md",
-            "type": "string"
-          },
-          "project_id": {
-            "description": "The project ID or URL-encoded path (namespace/project)",
-            "type": "string"
-          }
-        },
-        "required": [
-          "project_id",
-          "file_path",
-          "branch",
-          "commit_message",
-          "content"
-        ],
-        "type": "object"
-      },
-      "name": "createFile",
-      "title": "Create a file"
-    },
-    {
-      "annotations": {
-        "destructiveHint": false,
-        "openWorldHint": true,
-        "readOnlyHint": false
-      },
-      "description": "Update a file in the repository",
-      "inputSchema": {
-        "additionalProperties": false,
-        "properties": {
-          "branch": {
-            "description": "Branch to commit to",
-            "type": "string"
-          },
-          "commit_message": {
-            "description": "The commit message",
-            "type": "string"
-          },
-          "content": {
-            "description": "The new file content",
-            "type": "string"
-          },
-          "encoding": {
-            "description": "text or base64; text when omitted",
-            "type": "string"
-          },
-          "file_path": {
-            "description": "File path, e.g. docs/notes.md",
-            "type": "string"
-          },
-          "last_commit_id": {
-            "description": "Last known commit SHA, to fail if the file changed since",
-            "type": "string"
-          },
-          "project_id": {
-            "description": "The project ID or URL-encoded path (namespace/project)",
-            "type": "string"
-          }
-        },
-        "required": [
-          "project_id",
-          "file_path",
-          "branch",
-          "commit_message",
-          "content"
-        ],
-        "type": "object"
-      },
-      "name": "updateFile",
-      "title": "Update a file"
-    },
-    {
-      "annotations": {
-        "destructiveHint": true,
-        "openWorldHint": true,
-        "readOnlyHint": false
-      },
-      "description": "Delete a file from the repository",
-      "inputSchema": {
-        "additionalProperties": false,
-        "properties": {
-          "branch": {
-            "description": "Branch to commit to",
-            "type": "string"
-          },
-          "commit_message": {
-            "description": "The commit message",
-            "type": "string"
-          },
-          "file_path": {
-            "description": "File path, e.g. docs/notes.md",
-            "type": "string"
-          },
-          "project_id": {
-            "description": "The project ID or URL-encoded path (namespace/project)",
-            "type": "string"
-          }
-        },
-        "required": [
-          "project_id",
-          "file_path",
-          "branch",
-          "commit_message"
-        ],
-        "type": "object"
-      },
-      "name": "deleteFile",
-      "title": "Delete a file"
-    },
-    {
-      "annotations": {
-        "idempotentHint": true,
-        "openWorldHint": true,
-        "readOnlyHint": true
-      },
       "description": "List a project's issues, optionally filtered by state and labels",
       "inputSchema": {
         "additionalProperties": false,
@@ -534,7 +462,7 @@
         "openWorldHint": true,
         "readOnlyHint": true
       },
-      "description": "Get one issue by its internal ID",
+      "description": "Get one issue by its internal ID, with its notes",
       "inputSchema": {
         "additionalProperties": false,
         "properties": {
@@ -683,7 +611,7 @@
         ],
         "type": "object"
       },
-      "name": "createIssueNote",
+      "name": "commentOnIssue",
       "title": "Comment on an issue"
     },
     {
@@ -738,7 +666,7 @@
         "openWorldHint": true,
         "readOnlyHint": true
       },
-      "description": "Get one merge request by its internal ID",
+      "description": "Get one merge request by its internal ID, with its notes",
       "inputSchema": {
         "additionalProperties": false,
         "properties": {
@@ -846,6 +774,71 @@
     },
     {
       "annotations": {
+        "destructiveHint": false,
+        "openWorldHint": true,
+        "readOnlyHint": false
+      },
+      "description": "Propose changes as a merge request: creates a branch, commits every file in one commit, and opens the merge request",
+      "inputSchema": {
+        "additionalProperties": false,
+        "properties": {
+          "description": {
+            "description": "The merge request text, in Markdown",
+            "type": "string"
+          },
+          "files": {
+            "description": "Files to create or update; existing files are updated, missing files are created",
+            "items": {
+              "additionalProperties": false,
+              "properties": {
+                "content": {
+                  "description": "The file content, as plain text",
+                  "type": "string"
+                },
+                "path": {
+                  "description": "File path, e.g. docs/notes.md",
+                  "type": "string"
+                }
+              },
+              "required": [
+                "path",
+                "content"
+              ],
+              "type": "object"
+            },
+            "type": "array"
+          },
+          "new_branch": {
+            "description": "Branch to create for the changes",
+            "type": "string"
+          },
+          "project_id": {
+            "description": "The project ID or URL-encoded path (namespace/project)",
+            "type": "string"
+          },
+          "target_branch": {
+            "description": "Branch the changes target, e.g. main",
+            "type": "string"
+          },
+          "title": {
+            "description": "The merge request title; also used as the commit message",
+            "type": "string"
+          }
+        },
+        "required": [
+          "project_id",
+          "target_branch",
+          "new_branch",
+          "files",
+          "title"
+        ],
+        "type": "object"
+      },
+      "name": "proposeChanges",
+      "title": "Propose changes"
+    },
+    {
+      "annotations": {
         "idempotentHint": true,
         "openWorldHint": true,
         "readOnlyHint": true
@@ -902,6 +895,6 @@
       "title": "List pipelines"
     }
   ],
-  "version": "0.1.0",
+  "version": "0.2.0",
   "websiteUrl": "https://docs.gitlab.com/ee/api/"
 }
