@@ -22,7 +22,7 @@
       }
     ]
   },
-  "description": "Read, create, update and delete Google Calendar events: list agendas, fetch event details, and make scheduling changes.",
+  "description": "Read, create, update and delete Google Calendar events, and find free time: list agendas, fetch event details, make scheduling changes, and search for open slots of a given length across calendars.",
   "icons": [
     {
       "src": "https://raw.githubusercontent.com/agentrq/agentrq-os-connectors/main/gcal/icon.svg",
@@ -239,8 +239,49 @@
       },
       "name": "deleteEvent",
       "title": "Delete an event"
+    },
+    {
+      "annotations": {
+        "idempotentHint": true,
+        "openWorldHint": true,
+        "readOnlyHint": true
+      },
+      "description": "Find free time slots of at least a given length within a time window, across one or more calendars. One call asks the API for free/busy blocks and computes the open slots, so the agent never does interval math by hand",
+      "inputSchema": {
+        "additionalProperties": false,
+        "properties": {
+          "calendarIds": {
+            "description": "Calendar IDs to consider; defaults to [\"primary\"]",
+            "items": {
+              "type": "string"
+            },
+            "type": "array"
+          },
+          "durationMinutes": {
+            "description": "Minimum slot length in minutes",
+            "minimum": 1,
+            "type": "integer"
+          },
+          "timeMax": {
+            "description": "End of the window, RFC3339, e.g. 2026-10-18T00:00:00-07:00",
+            "type": "string"
+          },
+          "timeMin": {
+            "description": "Start of the window, RFC3339, e.g. 2026-10-11T00:00:00-07:00",
+            "type": "string"
+          }
+        },
+        "required": [
+          "timeMin",
+          "timeMax",
+          "durationMinutes"
+        ],
+        "type": "object"
+      },
+      "name": "findFreeTime",
+      "title": "Find free time"
     }
   ],
-  "version": "0.1.0",
+  "version": "0.2.0",
   "websiteUrl": "https://developers.google.com/workspace/calendar/api"
 }

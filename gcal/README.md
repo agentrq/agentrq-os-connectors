@@ -2,7 +2,7 @@
 
 An [AgentRQ](https://agentrq.com) connector (MCP server compiled to a `wasm32-wasip2`
 component) for the Google Calendar API v3. List agendas, fetch event details,
-and make scheduling changes.
+make scheduling changes, and find free time.
 
 ![icon](icon.svg)
 
@@ -15,6 +15,28 @@ and make scheduling changes.
 | `createEvent` | `events.insert` | Create an event (`sendUpdates` to notify guests) |
 | `updateEvent` | `events.patch` | Patch semantics — only given fields change |
 | `deleteEvent` | `events.delete` | Delete an event |
+| `findFreeTime` | `freebusy.query` + slot computation | Free slots of at least `durationMinutes` in a window, across calendars |
+
+`findFreeTime` answers `{slots: [{start, end}]}` in chronological order,
+formatted in the window's offset. Busy blocks from every searched calendar
+are merged (overlapping or adjacent blocks leave no phantom slot); a
+calendar the API reports an error for becomes a tool error rather than a
+silent lie about free time.
+
+## What changed in 0.2.0
+
+The event tools were already task-shaped, so the redesign keeps them and
+fills the one composed gap:
+
+- **New: `findFreeTime`.** "Find a 30-minute slot next week" used to force
+  the agent to `listEvents` and do interval math by hand. Now one call runs
+  a single `freebusy.query` and the connector computes the free slots
+  itself — a pure, fully unit-tested sweep over the merged busy intervals.
+- **Internal structure.** All tools now go through `call_with` with an
+  injected sender (the pattern from `gdrive`): production sends over HTTP,
+  tests drain queued responses, so every line after a send is covered.
+  Each tool is `plan_*` / `parse_*` / `combine_*` pure helpers. Behavior
+  of the five event tools is unchanged.
 
 ## Auth
 
