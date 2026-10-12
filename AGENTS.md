@@ -13,6 +13,17 @@ durable: add an entry only when it's worth a future session knowing.
 - Prefer fewer, task-shaped tools over exhaustive endpoint coverage. Add a
   low-level tool only when it is a genuinely useful primitive for agents.
 
+## Verify against the provider's docs (critical)
+- Never build against assumed API behavior. Verify every endpoint shape,
+  scope, and permission against the provider's official docs before writing
+  code — a wrong guess in OAuth scopes or URL shape ships a connector that
+  silently can't do its job.
+- Example: Microsoft Graph shared/delegated mailbox access needs the delegated
+  `Mail.ReadWrite.Shared` / `Mail.Send.Shared` scopes on top of
+  `Mail.ReadWrite` / `Mail.Send`, targets `/users/{userPrincipalName}/…`
+  instead of `/me/…`, and Graph has no endpoint enumerating the mailboxes a
+  user can access — so mailbox discovery must be explicit, never guessed.
+
 ## Connector quality bar
 - Every connector must apply Rust best practices, software design best
   practices, and sound data structures & algorithms: idiomatic error handling
