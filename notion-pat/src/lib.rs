@@ -2092,10 +2092,140 @@ mod tests {
     #[test]
     fn unknown_tools_are_not_found() {
         let mut stub = Stub::of(&[]);
-        assert!(matches!(
-            call("nope", "{}", &mut stub),
-            Err(ConnectorError::NotFound(_))
-        ));
+        let result = call("nope", "{}", &mut stub);
+        assert!(matches!(result, Err(ConnectorError::NotFound(_)))); // coverage: exclude — matches! false arm is unreachable in a passing test
+    }
+
+    #[test]
+    fn refuses_bad_input() {
+        // Every tool parses its input before anything else (getCurrentUser
+        // takes no input); malformed JSON must fail fast as a tool error
+        // and send nothing.
+        for tool in [
+            "search",
+            "getPage",
+            "createPage",
+            "updatePage",
+            "movePage",
+            "queryDataSource",
+            "getDataSource",
+            "createDataSource",
+            "appendContent",
+            "listComments",
+            "createComment",
+        ] {
+            let mut stub = Stub::of(&[]);
+            let result = call(tool, "{oops", &mut stub);
+            assert!(is_tool_error(&result), "{tool}: {result:?}");
+            assert!(stub.seen.is_empty(), "{tool}: sent a request for bad input");
+        }
+    }
+
+    #[test]
+    fn rejects_unresolvable_titles() {
+        // A title that is not an id triggers a workspace search; when the
+        // search itself fails, or finds nothing to pick, resolution errors.
+        let empty_search = ok_json(r#"{"results": []}"#);
+
+        // queryDataSource: search failure, then empty search results.
+        for stub in [Stub::of(&[]), Stub::of(&[empty_search.clone()])] {
+            let mut stub = stub;
+            let result = call(
+                "queryDataSource",
+                r#"{"dataSource": "No Such Source"}"#,
+                &mut stub,
+            );
+            assert!(is_tool_error(&result), "{result:?}");
+        }
+
+        // getDataSource: search failure.
+        let mut stub = Stub::of(&[]);
+        let result = call(
+            "getDataSource",
+            r#"{"dataSource": "No Such Source"}"#,
+            &mut stub,
+        );
+        assert!(is_tool_error(&result), "{result:?}");
+
+        // createDataSource: parent page search failure, then empty results.
+        let body = r#"{"parent": "No Such Page", "title": "T", "properties": [{"name": "N", "type": "title"}]}"#;
+        for stub in [Stub::of(&[]), Stub::of(&[empty_search.clone()])] {
+            let mut stub = stub;
+            let result = call("createDataSource", body, &mut stub);
+            assert!(is_tool_error(&result), "{result:?}");
+        }
+
+        // createPage: parent page search failure.
+        let mut stub = Stub::of(&[]);
+        let result = call(
+            "createPage",
+            r#"{"parent": {"page": "No Such Page"}}"#,
+            &mut stub,
+        );
+        assert!(is_tool_error(&result), "{result:?}");
+    }
+
+    #[test]
+    fn rejects_bad_query_filters_and_sorts() {
+        // build_filter and build_sorts fail through queryDataSource once the
+        // data source resolves by id and its schema reads back.
+        let id = "12345678-1234-1234-1234-123456789abc";
+        let schema = ok_json(r#"{"properties": {"Name": {"type": "title"}}}"#);
+
+        let mut stub = Stub::of(&[schema.clone()]);
+        let result = call(
+            "queryDataSource",
+            &format!(r#"{{"dataSource": "{id}", "filter": {{"Bogus": "x"}}}}"#),
+            &mut stub,
+        );
+        assert!(is_tool_error(&result), "{result:?}");
+
+        let mut stub = Stub::of(&[schema]);
+        let result = call(
+            "queryDataSource",
+            &format!(r#"{{"dataSource": "{id}", "sorts": [{{"direction": "sideways"}}]}}"#),
+            &mut stub,
+        );
+        assert!(is_tool_error(&result), "{result:?}");
+    }
+
+    #[test]
+    fn rejects_unknown_properties() {
+        // map_properties fails through createPage and updatePage when a
+        // property is not writable there.
+        let id = "12345678-1234-1234-1234-123456789abc";
+
+        let mut stub = Stub::of(&[]);
+        let result = call(
+            "createPage",
+            &format!(r#"{{"parent": {{"page": "{id}"}}, "properties": {{"Bogus": "x"}}}}"#),
+            &mut stub,
+        );
+        assert!(is_tool_error(&result), "{result:?}");
+
+        // The page lives outside a data source, so only the title writes.
+        let mut stub = Stub::of(&[ok_json(&format!(
+            r#"{{"id": "{id}", "parent": {{"type": "page_id"}}}}"#
+        ))]);
+        let result = call(
+            "updatePage",
+            &format!(r#"{{"pageId": "{id}", "properties": {{"Bogus": "x"}}}}"#),
+            &mut stub,
+        );
+        assert!(is_tool_error(&result), "{result:?}");
+    }
+
+    #[test]
+    fn surfaces_failing_content_append() {
+        // createPage creates the page, then the content append fails.
+        let id = "12345678-1234-1234-1234-123456789abc";
+        let mut stub = Stub::of(&[ok_json(&format!(r#"{{"id": "{id}"}}"#))]);
+        let result = call(
+            "createPage",
+            &format!(r#"{{"parent": {{"page": "{id}"}}, "content": "hello"}}"#),
+            &mut stub,
+        );
+        assert!(is_tool_error(&result), "{result:?}");
     }
 
     #[test]
@@ -2499,6 +2629,7 @@ mod filter_tests {
             (r#"{"and": "x"}"#, "and needs an array"),
             (r#"{"and": []}"#, "and needs at least one condition"),
             (r#"{"or": []}"#, "or needs at least one condition"),
+            (r#"{"and": [{"Missing": "x"}]}"#, "no property \"Missing\""),
         ];
         for (filter, message) in bad {
             let error = build_filter(&schema, &serde_json::from_str(filter).unwrap())

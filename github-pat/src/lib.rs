@@ -329,7 +329,7 @@ impl GithubPat {
             "createPull" => one_call(api, &request, &mut send, plan_create_pull),
             "mergePull" => one_call(api, &request, &mut send, plan_merge_pull),
             "proposeChanges" => propose_changes(api, &request, &mut send),
-            "getAuthenticatedUser" => answer(&send(&plan_get_authenticated_user(api)?)?),
+            "getAuthenticatedUser" => answer(&send(&plan_get_authenticated_user(api)?)?), // coverage: exclude — plan_get_authenticated_user returns Ok unconditionally
             "listWorkflowRuns" => one_call(api, &request, &mut send, plan_list_workflow_runs),
             other => Err(ConnectorError::NotFound(format!("no tool {other}"))),
         }
@@ -362,7 +362,7 @@ where
     I: for<'de> Deserialize<'de>,
 {
     let input: I = request.json()?;
-    answer(&send(&plan(api, &input)?)?)
+    answer(&send(&plan(api, &input)?)?) // coverage: exclude — every plan passed to one_call is infallible (Ok(..) or .json(&Value))
 }
 
 /// The response of one step of a multi-call tool: 2xx continues the tool,
@@ -467,7 +467,7 @@ fn read_file(
         &input.repo,
         &input.path,
         input.ref_.as_deref(),
-    )?)?;
+    )?)?; // coverage: exclude — plan_contents_get returns Ok unconditionally
     if let Err(error) = step_ok(&response, "reading the file") {
         return Ok(error);
     }
@@ -559,7 +559,7 @@ fn list_directory(
         &input.repo,
         input.path.as_deref().unwrap_or(""),
         input.ref_.as_deref(),
-    )?)?;
+    )?)?; // coverage: exclude — plan_contents_get returns Ok unconditionally
     if let Err(error) = step_ok(&response, "listing the directory") {
         return Ok(error);
     }
@@ -617,7 +617,7 @@ fn write_file(
         &input.repo,
         &input.path,
         Some(&input.branch),
-    )?)?;
+    )?)?; // coverage: exclude — plan_contents_get returns Ok unconditionally
     let sha = match current.status {
         // The file does not exist yet: the write creates it.
         404 => None,
@@ -636,7 +636,7 @@ fn write_file(
             }
         }
     };
-    let written = send(&plan_write_file(api, &input, sha.as_deref())?)?;
+    let written = send(&plan_write_file(api, &input, sha.as_deref())?)?; // coverage: exclude — plan_write_file serializes a Value, which is infallible
     if let Err(error) = step_ok(&written, "writing the file") {
         return Ok(error);
     }
@@ -689,7 +689,7 @@ fn delete_file(
         &input.repo,
         &input.path,
         Some(&input.branch),
-    )?)?;
+    )?)?; // coverage: exclude — plan_contents_get returns Ok unconditionally
     if let Err(error) = step_ok(&current, "resolving the file's sha") {
         return Ok(error);
     }
@@ -707,7 +707,7 @@ fn delete_file(
         .message
         .clone()
         .unwrap_or_else(|| format!("delete {}", input.path));
-    let deleted = send(&plan_delete_file(api, &input, &meta.sha, &message)?)?;
+    let deleted = send(&plan_delete_file(api, &input, &meta.sha, &message)?)?; // coverage: exclude — plan_delete_file serializes a Value, which is infallible
     if let Err(error) = step_ok(&deleted, "deleting the file") {
         return Ok(error);
     }
@@ -961,13 +961,13 @@ fn propose_changes(
     }
     let base_sha = base.json::<GitRef>()?.object.sha;
 
-    let tree = send(&plan_propose_tree(&repo, &input, &base_sha)?)?;
+    let tree = send(&plan_propose_tree(&repo, &input, &base_sha)?)?; // coverage: exclude — plan_propose_tree serializes a Value, which is infallible
     if let Err(error) = step_ok(&tree, "creating the tree") {
         return Ok(error);
     }
     let tree_sha = tree.json::<GitTree>()?.sha;
 
-    let commit = send(&plan_propose_commit(&repo, &input, &tree_sha, &base_sha)?)?;
+    let commit = send(&plan_propose_commit(&repo, &input, &tree_sha, &base_sha)?)?; // coverage: exclude — plan_propose_commit serializes a Value, which is infallible
     if let Err(error) = step_ok(&commit, "creating the commit") {
         return Ok(error);
     }
@@ -979,12 +979,12 @@ fn propose_changes(
             Some(json!(format!("refs/heads/{}", input.new_branch))),
         ),
         ("sha", Some(json!(commit_sha))),
-    ]))?)?;
+    ]))?)?; // coverage: exclude — .json(&Value) serializes infallibly
     if let Err(error) = step_ok(&branch, "creating the branch") {
         return Ok(error);
     }
 
-    let pull = send(&plan_propose_pull(&repo, &input)?)?;
+    let pull = send(&plan_propose_pull(&repo, &input)?)?; // coverage: exclude — plan_propose_pull serializes a Value, which is infallible
     if let Err(error) = step_ok(&pull, "opening the pull request") {
         return Ok(error);
     }
@@ -1537,7 +1537,7 @@ mod tests {
         );
 
         // Assert: the shape error surfaces as a connector error.
-        assert!(matches!(failed, Err(ConnectorError::Upstream(_))));
+        assert!(matches!(failed, Err(ConnectorError::Upstream(_)))); // coverage: exclude — matches! false arm is unreachable in a passing test
     }
 
     #[test]
@@ -1553,7 +1553,7 @@ mod tests {
         );
 
         // Assert: the shape error surfaces as a connector error.
-        assert!(matches!(failed, Err(ConnectorError::Upstream(_))));
+        assert!(matches!(failed, Err(ConnectorError::Upstream(_)))); // coverage: exclude — matches! false arm is unreachable in a passing test
     }
 
     #[test]
@@ -2222,18 +2222,47 @@ mod tests {
 
     #[test]
     fn refuses_bad_input() {
-        // Arrange.
+        // Arrange: every tool that parses an input body, each with a body
+        // that is not JSON. getAuthenticatedUser takes no input, so there
+        // is no body for it to refuse.
+        let tools = [
+            "getRepo",
+            "listRepos",
+            "createRepo",
+            "readFile",
+            "listDirectory",
+            "writeFile",
+            "deleteFile",
+            "listBranches",
+            "listCommits",
+            "getCommit",
+            "listIssues",
+            "getIssue",
+            "createIssue",
+            "updateIssue",
+            "commentOnIssue",
+            "listPulls",
+            "getPull",
+            "createPull",
+            "mergePull",
+            "proposeChanges",
+            "listWorkflowRuns",
+        ];
+
+        // Act + assert: invalid input, and nothing was sent.
+        for tool in tools {
+            let mut stub = Stub::of(&[]);
+            let rejected = call(tool, "{oops", &mut stub);
+            assert!(
+                matches!(rejected, Err(ConnectorError::InvalidInput(_))), // coverage: exclude — matches! false arm is unreachable in a passing test
+                "{tool}: {rejected:?}"
+            );
+            assert!(stub.seen.is_empty(), "{tool} sent a request");
+        }
+
+        // An unknown tool is still not found, not invalid input.
         let mut stub = Stub::of(&[]);
-
-        // Act.
-        let missing = call("getRepo", r#"{"owner":"octocat"}"#, &mut stub);
         let unknown = call("nope", "{}", &mut stub);
-
-        // Assert.
-        assert!(
-            matches!(missing, Err(ConnectorError::InvalidInput(_))),
-            "{missing:?}"
-        );
         assert_eq!(
             unknown.unwrap_err(),
             ConnectorError::NotFound("no tool nope".into())
@@ -2253,9 +2282,95 @@ mod tests {
         );
         let garbled = answer(&response(200, "<html>"));
         assert!(
-            matches!(garbled, Err(ConnectorError::Upstream(_))),
+            matches!(garbled, Err(ConnectorError::Upstream(_))), // coverage: exclude — matches! false arm is unreachable in a passing test
             "{garbled:?}"
         );
+    }
+
+    #[test]
+    fn surfaces_garbled_responses() {
+        // A 200 whose body is not JSON: every response.json() site must
+        // surface it as an upstream error instead of answering garbage.
+        let garbled = || response(200, "<html>");
+        let file_meta = || {
+            ok_json(r#"{"type":"file","sha":"s","size":1,"encoding":"base64","content":"aGk="}"#)
+        };
+        let base_ref = || ok_json(r#"{"object":{"sha":"b"}}"#);
+        let sha = |s: &str| response(201, &format!(r#"{{"sha":"{s}"}}"#));
+        let write_body =
+            r#"{"owner":"o","repo":"r","path":"f","branch":"b","content":"aGk=","message":"m"}"#;
+        let propose_body = r#"{"owner":"o","repo":"r","base":"main","new_branch":"f","files":[{"path":"a","content":"b"}],"title":"T"}"#;
+
+        let cases: &[(&str, &str, Vec<Response>)] = &[
+            // One-call tools answer through `answer`.
+            ("getRepo", r#"{"owner":"o","repo":"r"}"#, vec![garbled()]),
+            ("getAuthenticatedUser", "{}", vec![garbled()]),
+            // Multi-call tools parse each step's response.
+            (
+                "readFile",
+                r#"{"owner":"o","repo":"r","path":"f"}"#,
+                vec![garbled()],
+            ),
+            (
+                "listDirectory",
+                r#"{"owner":"o","repo":"r"}"#,
+                vec![garbled()],
+            ),
+            ("writeFile", write_body, vec![garbled()]),
+            ("writeFile", write_body, vec![file_meta(), garbled()]),
+            (
+                "deleteFile",
+                r#"{"owner":"o","repo":"r","path":"f","branch":"b"}"#,
+                vec![garbled()],
+            ),
+            (
+                "getIssue",
+                r#"{"owner":"o","repo":"r","issue_number":1}"#,
+                vec![garbled(), ok_json("{}")],
+            ),
+            (
+                "getIssue",
+                r#"{"owner":"o","repo":"r","issue_number":1}"#,
+                vec![ok_json("{}"), garbled()],
+            ),
+            (
+                "getPull",
+                r#"{"owner":"o","repo":"r","pull_number":1}"#,
+                vec![garbled(), ok_json("{}")],
+            ),
+            (
+                "getPull",
+                r#"{"owner":"o","repo":"r","pull_number":1}"#,
+                vec![ok_json("{}"), garbled()],
+            ),
+            ("proposeChanges", propose_body, vec![garbled()]),
+            ("proposeChanges", propose_body, vec![base_ref(), garbled()]),
+            (
+                "proposeChanges",
+                propose_body,
+                vec![base_ref(), sha("t"), garbled()],
+            ),
+            (
+                "proposeChanges",
+                propose_body,
+                vec![
+                    base_ref(),
+                    sha("t"),
+                    sha("c"),
+                    response(201, "{}"),
+                    garbled(),
+                ],
+            ),
+        ];
+
+        for (tool, body, responses) in cases {
+            let mut stub = Stub::of(responses);
+            let failed = call(tool, body, &mut stub);
+            assert!(
+                matches!(failed, Err(ConnectorError::Upstream(_))), // coverage: exclude — matches! false arm is unreachable in a passing test
+                "{tool}: {failed:?}"
+            );
+        }
     }
 
     #[test]
@@ -2282,7 +2397,60 @@ mod tests {
         ] {
             let failed = GithubPat::call_with(request(tool, body), &mut failing);
             assert!(
-                matches!(failed, Err(ConnectorError::Upstream(_))),
+                matches!(failed, Err(ConnectorError::Upstream(_))), // coverage: exclude — matches! false arm is unreachable in a passing test
+                "{tool}: {failed:?}"
+            );
+        }
+    }
+
+    #[test]
+    fn propagates_later_sender_errors() {
+        // The sender fails after the first call: every later send's `?`
+        // must propagate the failure instead of answering.
+        let file_meta = || {
+            ok_json(r#"{"type":"file","sha":"s","size":1,"encoding":"base64","content":"aGk="}"#)
+        };
+        let write_body =
+            r#"{"owner":"o","repo":"r","path":"f","branch":"b","content":"aGk=","message":"m"}"#;
+        let delete_body = r#"{"owner":"o","repo":"r","path":"f","branch":"b"}"#;
+        let propose_body = r#"{"owner":"o","repo":"r","base":"main","new_branch":"f","files":[{"path":"a","content":"b"}],"title":"T"}"#;
+        let base_ref = || ok_json(r#"{"object":{"sha":"b"}}"#);
+        let sha = |s: &str| response(201, &format!(r#"{{"sha":"{s}"}}"#));
+
+        // Each case queues the responses before the failing send; the stub's
+        // exhaustion is the sender failure.
+        let cases: &[(&str, &str, Vec<Response>)] = &[
+            ("writeFile", write_body, vec![file_meta()]),
+            ("deleteFile", delete_body, vec![file_meta()]),
+            (
+                "getIssue",
+                r#"{"owner":"o","repo":"r","issue_number":1}"#,
+                vec![ok_json("{}")],
+            ),
+            (
+                "getPull",
+                r#"{"owner":"o","repo":"r","pull_number":1}"#,
+                vec![ok_json("{}")],
+            ),
+            ("proposeChanges", propose_body, vec![base_ref()]),
+            ("proposeChanges", propose_body, vec![base_ref(), sha("t")]),
+            (
+                "proposeChanges",
+                propose_body,
+                vec![base_ref(), sha("t"), sha("c")],
+            ),
+            (
+                "proposeChanges",
+                propose_body,
+                vec![base_ref(), sha("t"), sha("c"), response(201, "{}")],
+            ),
+        ];
+
+        for (tool, body, responses) in cases {
+            let mut stub = Stub::of(responses);
+            let failed = call(tool, body, &mut stub);
+            assert!(
+                matches!(failed, Err(ConnectorError::Upstream(_))), // coverage: exclude — matches! false arm is unreachable in a passing test
                 "{tool}: {failed:?}"
             );
         }

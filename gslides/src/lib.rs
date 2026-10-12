@@ -239,7 +239,7 @@ fn create_presentation(
     let input: CreatePresentation = request.json()?;
     let created = send(&Request::post(api.presentations.clone()).json(&json!({
         "title": input.title
-    }))?)?;
+    }))?)?; // coverage: exclude — Request::json serializes a serde_json::Value, which is infallible
     if let Err(error) = step_ok(&created, "creating the presentation") {
         return Ok(error);
     }
@@ -349,7 +349,7 @@ fn add_slide(
     if let Some(index) = input.index {
         create["createSlide"]["insertionIndex"] = json!(index);
     }
-    let planned = batch_update_request(api, &input.presentation_id, &[create], None)?;
+    let planned = batch_update_request(api, &input.presentation_id, &[create], None)?; // coverage: exclude — batch_update_request only fails serializing a serde_json::Value, which is infallible
     let created = send(&planned)?;
     if let Err(error) = step_ok(&created, "creating the slide") {
         return Ok(error);
@@ -392,7 +392,7 @@ fn add_slide(
         })?;
         requests.push(insert_text_request(&object_id, body));
     }
-    let planned = batch_update_request(api, &input.presentation_id, &requests, None)?;
+    let planned = batch_update_request(api, &input.presentation_id, &requests, None)?; // coverage: exclude — batch_update_request only fails serializing a serde_json::Value, which is infallible
     let written = send(&planned)?;
     if let Err(error) = step_ok(&written, "writing the slide text") {
         return Ok(error);
@@ -439,7 +439,7 @@ fn set_slide_text(
             requests.push(insert_text_request(&object_id, text));
         }
     }
-    let planned = batch_update_request(api, &input.presentation_id, &requests, None)?;
+    let planned = batch_update_request(api, &input.presentation_id, &requests, None)?; // coverage: exclude — batch_update_request only fails serializing a serde_json::Value, which is infallible
     let written = send(&planned)?;
     if let Err(error) = step_ok(&written, "writing the slide text") {
         return Ok(error);
@@ -507,7 +507,7 @@ fn replace_text(
     if let Some(page_ids) = input.page_ids {
         replace["replaceAllText"]["pageObjectIds"] = json!(page_ids);
     }
-    let planned = batch_update_request(api, &input.presentation_id, &[replace], None)?;
+    let planned = batch_update_request(api, &input.presentation_id, &[replace], None)?; // coverage: exclude — batch_update_request only fails serializing a serde_json::Value, which is infallible
     let updated = send(&planned)?;
     if let Err(error) = step_ok(&updated, "replacing the text") {
         return Ok(error);
@@ -530,7 +530,7 @@ fn delete_slide(
 ) -> Result<ToolResponse, ConnectorError> {
     let input: DeleteSlide = request.json()?;
     let delete = json!({ "deleteObject": { "objectId": input.slide_id } });
-    let planned = batch_update_request(api, &input.presentation_id, &[delete], None)?;
+    let planned = batch_update_request(api, &input.presentation_id, &[delete], None)?; // coverage: exclude — batch_update_request only fails serializing a serde_json::Value, which is infallible
     let updated = send(&planned)?;
     if let Err(error) = step_ok(&updated, "deleting the slide") {
         return Ok(error);
@@ -583,7 +583,7 @@ fn reorder_slides(
             })
         })
         .collect();
-    let planned = batch_update_request(api, &input.presentation_id, &requests, None)?;
+    let planned = batch_update_request(api, &input.presentation_id, &requests, None)?; // coverage: exclude — batch_update_request only fails serializing a serde_json::Value, which is infallible
     let moved = send(&planned)?;
     if let Err(error) = step_ok(&moved, "reordering the slides") {
         return Ok(error);
@@ -1098,7 +1098,7 @@ mod tests {
 
         // Assert.
         assert!(
-            matches!(missing, Err(ConnectorError::Upstream(_))),
+            matches!(missing, Err(ConnectorError::Upstream(_))), // coverage: exclude — matches! false arm is unreachable in a passing test
             "{missing:?}"
         );
 
@@ -1110,7 +1110,7 @@ mod tests {
 
         // Assert: nothing was sent.
         assert!(
-            matches!(bad, Err(ConnectorError::InvalidInput(_))),
+            matches!(bad, Err(ConnectorError::InvalidInput(_))), // coverage: exclude — matches! false arm is unreachable in a passing test
             "{bad:?}"
         );
         assert!(stub.seen.is_empty());
@@ -1158,6 +1158,55 @@ mod tests {
     }
 
     #[test]
+    fn gets_presentation_without_page_size() {
+        // Arrange: the API answers without a pageSize (e.g. a narrow field
+        // mask); the summary simply omits it.
+        let mut stub = Stub::of(&[ok_json(
+            r#"{"presentationId":"deck1","title":"Q3 Review","slides":[]}"#,
+        )]);
+
+        // Act.
+        let answered = call(
+            "getPresentation",
+            r#"{"presentation_id":"deck1"}"#,
+            &mut stub,
+        )
+        .unwrap();
+
+        // Assert.
+        let payload: Value = serde_json::from_str(answered.structured.as_deref().unwrap()).unwrap();
+        assert!(payload.get("pageSize").is_none());
+        assert_eq!(payload["slideCount"], json!(0));
+    }
+
+    #[test]
+    fn gets_presentation_with_partial_page_size() {
+        // A pageSize without a width, with a non-numeric width, and with a
+        // non-numeric height each omit the size summary instead of failing.
+        for page_size in [
+            r#"{"height":{"magnitude":5143500}}"#,
+            r#"{"width":{"magnitude":"wide"},"height":{"magnitude":5143500}}"#,
+            r#"{"width":{"magnitude":9144000}}"#,
+            r#"{"width":{"magnitude":9144000},"height":{"magnitude":"tall"}}"#,
+        ] {
+            let mut stub = Stub::of(&[ok_json(&format!(
+                r#"{{"presentationId":"deck1","title":"Q3","pageSize":{page_size}}}"#
+            ))]);
+
+            let answered = call(
+                "getPresentation",
+                r#"{"presentation_id":"deck1"}"#,
+                &mut stub,
+            )
+            .unwrap();
+
+            let payload: Value =
+                serde_json::from_str(answered.structured.as_deref().unwrap()).unwrap();
+            assert!(payload.get("pageSize").is_none(), "{page_size}");
+        }
+    }
+
+    #[test]
     fn get_presentation_reports_problems() {
         // Arrange: not found.
         let mut stub = Stub::of(&[response(404, "not found")]);
@@ -1185,7 +1234,7 @@ mod tests {
 
         // Assert.
         assert!(
-            matches!(garbled, Err(ConnectorError::Upstream(_))),
+            matches!(garbled, Err(ConnectorError::Upstream(_))), // coverage: exclude — matches! false arm is unreachable in a passing test
             "{garbled:?}"
         );
     }
@@ -1399,7 +1448,7 @@ mod tests {
 
         // Assert.
         assert!(
-            matches!(missing, Err(ConnectorError::Upstream(_))),
+            matches!(missing, Err(ConnectorError::Upstream(_))), // coverage: exclude — matches! false arm is unreachable in a passing test
             "{missing:?}"
         );
 
@@ -1539,7 +1588,7 @@ mod tests {
 
         // Assert.
         assert!(
-            matches!(bad, Err(ConnectorError::InvalidInput(_))),
+            matches!(bad, Err(ConnectorError::InvalidInput(_))), // coverage: exclude — matches! false arm is unreachable in a passing test
             "{bad:?}"
         );
         assert!(stub.seen.is_empty());
@@ -1702,9 +1751,30 @@ mod tests {
         // Act: bad input never reaches the sender.
         let bad = call("addImage", r#"{"presentation_id":"deck1"}"#, &mut stub);
         assert!(
-            matches!(bad, Err(ConnectorError::InvalidInput(_))),
+            matches!(bad, Err(ConnectorError::InvalidInput(_))), // coverage: exclude — matches! false arm is unreachable in a passing test
             "{bad:?}"
         );
+    }
+
+    #[test]
+    fn adds_image_with_height_only() {
+        // Arrange: only a height; width follows the height so the API fits
+        // the image proportionally.
+        let mut stub = Stub::of(&[ok_json("{}")]);
+
+        // Act.
+        call(
+            "addImage",
+            r#"{"presentation_id":"deck1","slide_id":"slide1","image_url":"https://example.com/a.png","height_inches":3}"#,
+            &mut stub,
+        )
+        .unwrap();
+
+        // Assert: both dimensions carry the height.
+        let body: Value = serde_json::from_slice(&stub.seen[0].body).unwrap();
+        let size = &body["requests"][0]["createImage"]["elementProperties"]["size"];
+        assert_eq!(size["width"]["magnitude"], json!(2743200));
+        assert_eq!(size["height"]["magnitude"], json!(2743200));
     }
 
     #[test]
@@ -1893,11 +1963,11 @@ mod tests {
 
         // Assert: both rejected, neither mutated.
         assert!(
-            matches!(missing, Err(ConnectorError::InvalidInput(_))),
+            matches!(missing, Err(ConnectorError::InvalidInput(_))), // coverage: exclude — matches! false arm is unreachable in a passing test
             "{missing:?}"
         );
         assert!(
-            matches!(duplicate, Err(ConnectorError::InvalidInput(_))),
+            matches!(duplicate, Err(ConnectorError::InvalidInput(_))), // coverage: exclude — matches! false arm is unreachable in a passing test
             "{duplicate:?}"
         );
         assert_eq!(
@@ -2009,7 +2079,7 @@ mod tests {
 
         // Assert.
         assert!(
-            matches!(missing, Err(ConnectorError::Upstream(_))),
+            matches!(missing, Err(ConnectorError::Upstream(_))), // coverage: exclude — matches! false arm is unreachable in a passing test
             "{missing:?}"
         );
 
@@ -2075,7 +2145,7 @@ mod tests {
 
         // Assert.
         assert!(
-            matches!(missing, Err(ConnectorError::InvalidInput(_))),
+            matches!(missing, Err(ConnectorError::InvalidInput(_))), // coverage: exclude — matches! false arm is unreachable in a passing test
             "{missing:?}"
         );
         assert!(stub.seen.is_empty());
@@ -2088,6 +2158,33 @@ mod tests {
             unknown.unwrap_err(),
             ConnectorError::NotFound("unknown tool: nope".into())
         );
+
+        // Every tool parses its input first, so malformed JSON fails before
+        // anything is sent.
+        for tool in [
+            "createPresentation",
+            "getPresentation",
+            "getSlide",
+            "addSlide",
+            "setSlideText",
+            "addImage",
+            "replaceText",
+            "deleteSlide",
+            "reorderSlides",
+            "getSlideThumbnail",
+            "batchUpdate",
+        ] {
+            let mut stub = Stub::of(&[]);
+            let bad = call(tool, "{oops", &mut stub);
+            assert!(
+                matches!(bad, Err(ConnectorError::InvalidInput(_))), // coverage: exclude — matches! false arm is unreachable in a passing test
+                "{tool}: {bad:?}"
+            );
+            assert!(
+                stub.seen.is_empty(),
+                "{tool} sent a request for malformed input"
+            );
+        }
     }
 
     #[test]
@@ -2101,7 +2198,7 @@ mod tests {
         );
         let garbled = answer(&response(200, "<html>"));
         assert!(
-            matches!(garbled, Err(ConnectorError::Upstream(_))),
+            matches!(garbled, Err(ConnectorError::Upstream(_))), // coverage: exclude — matches! false arm is unreachable in a passing test
             "{garbled:?}"
         );
     }
@@ -2140,6 +2237,169 @@ mod tests {
         // Assert.
         assert_eq!(
             exhausted.unwrap_err(),
+            ConnectorError::Upstream("stub sender ran out of responses".into())
+        );
+
+        // Every tool's first send surfaces a sender failure.
+        for (tool, body) in [
+            ("createPresentation", r#"{"title":"Q3"}"#),
+            ("getPresentation", r#"{"presentation_id":"deck1"}"#),
+            (
+                "getSlide",
+                r#"{"presentation_id":"deck1","slide_id":"slide1"}"#,
+            ),
+            ("addSlide", r#"{"presentation_id":"deck1"}"#),
+            (
+                "setSlideText",
+                r#"{"presentation_id":"deck1","slide_id":"slide1","title":"T"}"#,
+            ),
+            (
+                "addImage",
+                r#"{"presentation_id":"deck1","slide_id":"slide1","image_url":"https://example.com/a.png"}"#,
+            ),
+            (
+                "replaceText",
+                r#"{"presentation_id":"deck1","text":"a","replacement":"b"}"#,
+            ),
+            (
+                "deleteSlide",
+                r#"{"presentation_id":"deck1","slide_id":"slide1"}"#,
+            ),
+            (
+                "reorderSlides",
+                r#"{"presentation_id":"deck1","slide_ids":["slide1"]}"#,
+            ),
+            (
+                "getSlideThumbnail",
+                r#"{"presentation_id":"deck1","slide_id":"slide1"}"#,
+            ),
+            (
+                "batchUpdate",
+                r#"{"presentation_id":"deck1","requests":[]}"#,
+            ),
+        ] {
+            let mut stub = Stub::of(&[]);
+            let failed = call(tool, body, &mut stub);
+            assert_eq!(
+                failed.unwrap_err(),
+                ConnectorError::Upstream("stub sender ran out of responses".into()),
+                "{tool}"
+            );
+        }
+    }
+
+    #[test]
+    fn surfaces_garbled_responses() {
+        // A 200 with a non-JSON body fails the response parse.
+        for (tool, body) in [
+            ("createPresentation", r#"{"title":"Q3"}"#),
+            (
+                "getSlide",
+                r#"{"presentation_id":"deck1","slide_id":"slide1"}"#,
+            ),
+            ("addSlide", r#"{"presentation_id":"deck1"}"#),
+            (
+                "setSlideText",
+                r#"{"presentation_id":"deck1","slide_id":"slide1","title":"T"}"#,
+            ),
+            (
+                "replaceText",
+                r#"{"presentation_id":"deck1","text":"a","replacement":"b"}"#,
+            ),
+            (
+                "reorderSlides",
+                r#"{"presentation_id":"deck1","slide_ids":["slide1"]}"#,
+            ),
+            (
+                "getSlideThumbnail",
+                r#"{"presentation_id":"deck1","slide_id":"slide1"}"#,
+            ),
+        ] {
+            let mut stub = Stub::of(&[response(200, "<html>")]);
+            let garbled = call(tool, body, &mut stub);
+            assert!(
+                matches!(garbled, Err(ConnectorError::Upstream(_))), // coverage: exclude — matches! false arm is unreachable in a passing test
+                "{tool}: {garbled:?}"
+            );
+        }
+
+        // addSlide's second call (reading the new slide) garbled.
+        let mut stub = Stub::of(&[
+            ok_json(r#"{"replies":[{"createSlide":{"objectId":"newslide"}}]}"#),
+            response(200, "<html>"),
+        ]);
+        let garbled = call(
+            "addSlide",
+            r#"{"presentation_id":"deck1","title":"Kickoff"}"#,
+            &mut stub,
+        );
+        assert!(
+            matches!(garbled, Err(ConnectorError::Upstream(_))), // coverage: exclude — matches! false arm is unreachable in a passing test
+            "{garbled:?}"
+        );
+    }
+
+    #[test]
+    fn surfaces_later_send_failures() {
+        // addSlide's second call (reading the new slide) failing.
+        let mut stub = Stub::of(&[ok_json(
+            r#"{"replies":[{"createSlide":{"objectId":"newslide"}}]}"#,
+        )]);
+        let failed = call(
+            "addSlide",
+            r#"{"presentation_id":"deck1","title":"Kickoff"}"#,
+            &mut stub,
+        );
+        assert_eq!(
+            failed.unwrap_err(),
+            ConnectorError::Upstream("stub sender ran out of responses".into())
+        );
+
+        // addSlide's third call (writing the text) failing.
+        let mut stub = Stub::of(&[
+            ok_json(r#"{"replies":[{"createSlide":{"objectId":"newslide"}}]}"#),
+            ok_json(
+                r#"{"pageElements":[
+                    {"objectId":"t1","shape":{"placeholder":{"type":"TITLE"}}},
+                    {"objectId":"b1","shape":{"placeholder":{"type":"BODY"}}}
+                ]}"#,
+            ),
+        ]);
+        let failed = call(
+            "addSlide",
+            r#"{"presentation_id":"deck1","title":"Kickoff","body":"Agenda"}"#,
+            &mut stub,
+        );
+        assert_eq!(
+            failed.unwrap_err(),
+            ConnectorError::Upstream("stub sender ran out of responses".into())
+        );
+
+        // setSlideText's second call (writing the text) failing.
+        let mut stub = Stub::of(&[ok_json(
+            r#"{"pageElements":[
+                {"objectId":"t1","shape":{"placeholder":{"type":"TITLE"}}}
+            ]}"#,
+        )]);
+        let failed = call(
+            "setSlideText",
+            r#"{"presentation_id":"deck1","slide_id":"slide1","title":"New title"}"#,
+            &mut stub,
+        );
+        assert_eq!(
+            failed.unwrap_err(),
+            ConnectorError::Upstream("stub sender ran out of responses".into())
+        );
+
+        // reorderSlides' second call (moving the slides) failing.
+        let mut stub = Stub::of(&[ok_json(r#"{"slides":[{"objectId":"a"},{"objectId":"b"}]}"#)]);
+        let failed = call(
+            "reorderSlides",
+            r#"{"presentation_id":"deck1","slide_ids":["b","a"]}"#,
+            &mut stub,
+        );
+        assert_eq!(
+            failed.unwrap_err(),
             ConnectorError::Upstream("stub sender ran out of responses".into())
         );
     }
