@@ -162,7 +162,7 @@ struct CreateComment {
 
 impl Connector for Notion {
     fn call_tool(request: ToolRequest) -> Result<ToolResponse, ConnectorError> {
-        Self::call_with(request, &mut |request| request.send())
+        Self::call_with(request, &mut |request| Ok(request.clone().send()?))
     }
 }
 
@@ -230,7 +230,7 @@ fn step_ok(response: &Response, step: &str) -> Result<(), ToolError> {
 fn call_api(send: Sender<'_>, request: &Request, step: &str) -> Result<Value, ToolError> {
     let response = send(request)?;
     step_ok(&response, step)?;
-    response.json().map_err(ToolError::from)
+    Ok(response.json::<Value>().map_err(ConnectorError::from)?)
 }
 
 /// Plans a JSON POST.
@@ -442,7 +442,7 @@ fn readable_hit(hit: &Value) -> Value {
 
 /// Runs `search`: one workspace search mapped to compact hits.
 fn search(api: &str, request: &ToolRequest, send: Sender<'_>) -> Result<ToolResponse, ToolError> {
-    let input: Search = request.json()?;
+    let input: Search = request.json().map_err(ConnectorError::from)?;
     let filter = input.filter.as_deref().filter(|f| *f != "all");
     let hits = search_raw(api, send, &input.query, filter, input.page_size)?;
     ToolResponse::structured(&json!({
@@ -1292,7 +1292,7 @@ fn span_json(span: &Span) -> Value {
 /// Runs `getPage`: one page with plain-value properties, plus the body as
 /// Markdown when asked.
 fn get_page(api: &str, request: &ToolRequest, send: Sender<'_>) -> Result<ToolResponse, ToolError> {
-    let input: GetPage = request.json()?;
+    let input: GetPage = request.json().map_err(ConnectorError::from)?;
     let page = call_api(
         send,
         &Request::get(format!("{api}/v1/pages/{}", encode(&input.page_id))),
@@ -1386,7 +1386,7 @@ fn create_page(
     request: &ToolRequest,
     send: Sender<'_>,
 ) -> Result<ToolResponse, ToolError> {
-    let input: CreatePage = request.json()?;
+    let input: CreatePage = request.json().map_err(ConnectorError::from)?;
     let (parent, schema) = plan_parent(api, send, &input.parent)?;
     let mut body = Map::with_capacity(2);
     body.insert("parent".to_string(), parent);
@@ -1444,7 +1444,7 @@ fn update_page(
     request: &ToolRequest,
     send: Sender<'_>,
 ) -> Result<ToolResponse, ToolError> {
-    let input: UpdatePage = request.json()?;
+    let input: UpdatePage = request.json().map_err(ConnectorError::from)?;
     let mut body = Map::new();
     if let Some(properties) = &input.properties {
         let schema = data_source_schema_for_page(api, send, &input.page_id)?;
@@ -1478,7 +1478,7 @@ fn move_page(
     request: &ToolRequest,
     send: Sender<'_>,
 ) -> Result<ToolResponse, ToolError> {
-    let input: MovePage = request.json()?;
+    let input: MovePage = request.json().map_err(ConnectorError::from)?;
     let parent_id = resolve_page(api, send, &input.parent)?;
     let page = call_api(
         send,
@@ -1498,7 +1498,7 @@ fn query_data_source(
     request: &ToolRequest,
     send: Sender<'_>,
 ) -> Result<ToolResponse, ToolError> {
-    let input: QueryDataSource = request.json()?;
+    let input: QueryDataSource = request.json().map_err(ConnectorError::from)?;
     let id = resolve_data_source(api, send, &input.data_source)?;
     let schema = call_api(
         send,
@@ -1594,7 +1594,7 @@ fn get_data_source(
     request: &ToolRequest,
     send: Sender<'_>,
 ) -> Result<ToolResponse, ToolError> {
-    let input: DataSourceRef = request.json()?;
+    let input: DataSourceRef = request.json().map_err(ConnectorError::from)?;
     let id = resolve_data_source(api, send, &input.data_source)?;
     let schema = call_api(
         send,
@@ -1649,7 +1649,7 @@ fn create_data_source(
     request: &ToolRequest,
     send: Sender<'_>,
 ) -> Result<ToolResponse, ToolError> {
-    let input: CreateDataSource = request.json()?;
+    let input: CreateDataSource = request.json().map_err(ConnectorError::from)?;
     if input.properties.is_empty() {
         return Err(ToolError(
             "createDataSource needs at least one property".to_string(),
@@ -1679,7 +1679,7 @@ fn append_content(
     request: &ToolRequest,
     send: Sender<'_>,
 ) -> Result<ToolResponse, ToolError> {
-    let input: AppendContent = request.json()?;
+    let input: AppendContent = request.json().map_err(ConnectorError::from)?;
     let appended = append_blocks(api, send, &input.page_id, &input.markdown)?;
     ToolResponse::structured(&json!({
         "pageId": input.page_id,
@@ -1710,7 +1710,7 @@ fn list_comments(
     request: &ToolRequest,
     send: Sender<'_>,
 ) -> Result<ToolResponse, ToolError> {
-    let input: ListComments = request.json()?;
+    let input: ListComments = request.json().map_err(ConnectorError::from)?;
     let url = with_query(
         &format!("{api}/v1/comments"),
         &[
@@ -1729,7 +1729,7 @@ fn create_comment(
     request: &ToolRequest,
     send: Sender<'_>,
 ) -> Result<ToolResponse, ToolError> {
-    let input: CreateComment = request.json()?;
+    let input: CreateComment = request.json().map_err(ConnectorError::from)?;
     let body = object(&[
         ("parent", Some(json!({"page_id": input.page_id}))),
         (
