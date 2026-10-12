@@ -276,6 +276,12 @@ struct GitCommit {
     sha: String,
 }
 
+/// A commit behind `GET /git/commits/{sha}`: only its tree is needed.
+#[derive(Debug, Deserialize)]
+struct GitCommitDetail {
+    tree: GitTree,
+}
+
 /// A pull request behind `POST /pulls`.
 #[derive(Debug, Deserialize)]
 struct CreatedPull {
@@ -935,10 +941,10 @@ fn plan_merge_pull(api: &str, input: &MergePull) -> Result<Request, ConnectorErr
     .json(&body)?) // coverage: exclude — Request::json serializes a serde_json::Value here, which is infallible
 }
 
-/// Runs the five calls behind `proposeChanges`: resolve the base branch,
-/// create one tree for all files, commit it, point the new branch at the
-/// commit, and open the pull request — "make these edits and open a PR" in
-/// one tool call.
+/// Runs the six calls behind `proposeChanges`: resolve the base branch, read
+/// the base commit's tree, create one tree for all files, commit it, point
+/// the new branch at the commit, and open the pull request — "make these
+/// edits and open a PR" in one tool call.
 fn propose_changes(
     api: &str,
     request: &ToolRequest,
@@ -961,7 +967,18 @@ fn propose_changes(
     }
     let base_sha = base.json::<GitRef>()?.object.sha;
 
-    let tree = send(&plan_propose_tree(&repo, &input, &base_sha)?)?; // coverage: exclude — plan_propose_tree serializes a Value, which is infallible
+    // `base_tree` must be a tree-object SHA, not the base commit's SHA: read
+    // the base commit to learn its tree.
+    let base_commit = send(&Request::get(format!(
+        "{repo}/git/commits/{}",
+        encode(&base_sha)
+    )))?;
+    if let Err(error) = step_ok(&base_commit, "reading the base commit") {
+        return Ok(error);
+    }
+    let base_tree_sha = base_commit.json::<GitCommitDetail>()?.tree.sha;
+
+    let tree = send(&plan_propose_tree(&repo, &input, &base_tree_sha)?)?; // coverage: exclude — plan_propose_tree serializes a Value, which is infallible
     if let Err(error) = step_ok(&tree, "creating the tree") {
         return Ok(error);
     }
@@ -1007,7 +1024,7 @@ fn plan_propose_pull(repo: &str, input: &ProposeChanges) -> Result<Request, Conn
 fn plan_propose_tree(
     repo: &str,
     input: &ProposeChanges,
-    base_sha: &str,
+    base_tree_sha: &str,
 ) -> Result<Request, ConnectorError> {
     let tree: Vec<Value> = input
         .files
@@ -1022,7 +1039,7 @@ fn plan_propose_tree(
         })
         .collect();
     let body = object(&[
-        ("base_tree", Some(json!(base_sha))),
+        ("base_tree", Some(json!(base_tree_sha))),
         ("tree", Some(Value::Array(tree))),
     ]);
     Ok(Request::post(format!("{repo}/git/trees")).json(&body)?) // coverage: exclude — Request::json serializes a serde_json::Value here, which is infallible
@@ -2052,9 +2069,10 @@ mod tests {
 
     #[test]
     fn proposes_changes_end_to_end() {
-        // Arrange: base ref, tree, commit, branch ref, pull request.
+        // Arrange: base ref, base commit, tree, commit, branch ref, pull request.
         let mut stub = Stub::of(&[
             ok_json(r#"{"ref":"refs/heads/main","object":{"sha":"basesha"}}"#),
+            ok_json(r#"{"sha":"basesha","tree":{"sha":"basetreesha"}}"#),
             response(201, r#"{"sha":"treesha"}"#),
             response(201, r#"{"sha":"commitsha"}"#),
             response(201, r#"{"ref":"refs/heads/feature"}"#),
@@ -2072,37 +2090,42 @@ mod tests {
         )
         .unwrap();
 
-        // Assert: the five calls, in order.
-        assert_eq!(stub.seen.len(), 5);
+        // Assert: the six calls, in order.
+        assert_eq!(stub.seen.len(), 6);
         assert_eq!(
             stub.seen[0].url,
             format!("{API}/repos/o/r/git/ref/heads/main")
         );
-        assert_eq!(stub.seen[1].method, Method::Post);
-        assert_eq!(stub.seen[1].url, format!("{API}/repos/o/r/git/trees"));
+        // The tree is built on the base commit's tree SHA, not the commit SHA.
         assert_eq!(
-            body_json(&stub.seen[1]),
+            stub.seen[1].url,
+            format!("{API}/repos/o/r/git/commits/basesha")
+        );
+        assert_eq!(stub.seen[2].method, Method::Post);
+        assert_eq!(stub.seen[2].url, format!("{API}/repos/o/r/git/trees"));
+        assert_eq!(
+            body_json(&stub.seen[2]),
             json!({
-                "base_tree": "basesha",
+                "base_tree": "basetreesha",
                 "tree": [
                     {"path": "a.md", "mode": "100644", "type": "blob", "content": "hello"},
                     {"path": "b.md", "mode": "100644", "type": "blob", "content": "world"},
                 ],
             })
         );
-        assert_eq!(stub.seen[2].url, format!("{API}/repos/o/r/git/commits"));
-        assert_eq!(
-            body_json(&stub.seen[2]),
-            json!({"message": "Add docs", "tree": "treesha", "parents": ["basesha"]})
-        );
-        assert_eq!(stub.seen[3].url, format!("{API}/repos/o/r/git/refs"));
+        assert_eq!(stub.seen[3].url, format!("{API}/repos/o/r/git/commits"));
         assert_eq!(
             body_json(&stub.seen[3]),
-            json!({"ref": "refs/heads/feature", "sha": "commitsha"})
+            json!({"message": "Add docs", "tree": "treesha", "parents": ["basesha"]})
         );
-        assert_eq!(stub.seen[4].url, format!("{API}/repos/o/r/pulls"));
+        assert_eq!(stub.seen[4].url, format!("{API}/repos/o/r/git/refs"));
         assert_eq!(
             body_json(&stub.seen[4]),
+            json!({"ref": "refs/heads/feature", "sha": "commitsha"})
+        );
+        assert_eq!(stub.seen[5].url, format!("{API}/repos/o/r/pulls"));
+        assert_eq!(
+            body_json(&stub.seen[5]),
             json!({"title": "Add docs", "head": "feature", "base": "main", "body": "Two files"})
         );
 
@@ -2138,6 +2161,7 @@ mod tests {
         // Arrange: each step fails in turn while the earlier ones succeed.
         let steps = [
             "resolving the base branch",
+            "reading the base commit",
             "creating the tree",
             "creating the commit",
             "creating the branch",
@@ -2149,6 +2173,7 @@ mod tests {
             // Arrange: successes before the failing step, then the failure.
             let mut responses = vec![
                 ok_json(r#"{"object":{"sha":"b"}}"#),
+                ok_json(r#"{"sha":"b","tree":{"sha":"bt"}}"#),
                 response(201, r#"{"sha":"t"}"#),
                 response(201, r#"{"sha":"c"}"#),
                 response(201, r#"{}"#),
@@ -2299,6 +2324,7 @@ mod tests {
             ok_json(r#"{"type":"file","sha":"s","size":1,"encoding":"base64","content":"aGk="}"#)
         };
         let base_ref = || ok_json(r#"{"object":{"sha":"b"}}"#);
+        let base_commit = || ok_json(r#"{"sha":"b","tree":{"sha":"bt"}}"#);
         let sha = |s: &str| response(201, &format!(r#"{{"sha":"{s}"}}"#));
         let write_body =
             r#"{"owner":"o","repo":"r","path":"f","branch":"b","content":"aGk=","message":"m"}"#;
@@ -2351,13 +2377,19 @@ mod tests {
             (
                 "proposeChanges",
                 propose_body,
-                vec![base_ref(), sha("t"), garbled()],
+                vec![base_ref(), base_commit(), garbled()],
+            ),
+            (
+                "proposeChanges",
+                propose_body,
+                vec![base_ref(), base_commit(), sha("t"), garbled()],
             ),
             (
                 "proposeChanges",
                 propose_body,
                 vec![
                     base_ref(),
+                    base_commit(),
                     sha("t"),
                     sha("c"),
                     response(201, "{}"),
@@ -2418,6 +2450,7 @@ mod tests {
         let delete_body = r#"{"owner":"o","repo":"r","path":"f","branch":"b"}"#;
         let propose_body = r#"{"owner":"o","repo":"r","base":"main","new_branch":"f","files":[{"path":"a","content":"b"}],"title":"T"}"#;
         let base_ref = || ok_json(r#"{"object":{"sha":"b"}}"#);
+        let base_commit = || ok_json(r#"{"sha":"b","tree":{"sha":"bt"}}"#);
         let sha = |s: &str| response(201, &format!(r#"{{"sha":"{s}"}}"#));
 
         // Each case queues the responses before the failing send; the stub's
@@ -2436,16 +2469,31 @@ mod tests {
                 vec![ok_json("{}")],
             ),
             ("proposeChanges", propose_body, vec![base_ref()]),
-            ("proposeChanges", propose_body, vec![base_ref(), sha("t")]),
             (
                 "proposeChanges",
                 propose_body,
-                vec![base_ref(), sha("t"), sha("c")],
+                vec![base_ref(), base_commit()],
             ),
             (
                 "proposeChanges",
                 propose_body,
-                vec![base_ref(), sha("t"), sha("c"), response(201, "{}")],
+                vec![base_ref(), base_commit(), sha("t")],
+            ),
+            (
+                "proposeChanges",
+                propose_body,
+                vec![base_ref(), base_commit(), sha("t"), sha("c")],
+            ),
+            (
+                "proposeChanges",
+                propose_body,
+                vec![
+                    base_ref(),
+                    base_commit(),
+                    sha("t"),
+                    sha("c"),
+                    response(201, "{}"),
+                ],
             ),
         ];
 

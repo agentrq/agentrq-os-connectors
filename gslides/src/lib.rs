@@ -29,11 +29,13 @@ const DEFAULT_LAYOUT: &str = "TITLE_AND_BODY";
 /// The predefined layouts `addSlide` accepts.
 const LAYOUTS: &[&str] = &[
     "BLANK",
+    "CAPTION_ONLY",
     "TITLE",
     "TITLE_AND_BODY",
     "TITLE_AND_TWO_COLUMNS",
     "TITLE_ONLY",
     "SECTION_HEADER",
+    "SECTION_TITLE_AND_DESCRIPTION",
     "ONE_COLUMN_TEXT",
     "MAIN_POINT",
     "BIG_NUMBER",
@@ -1407,6 +1409,36 @@ mod tests {
         );
         let payload: Value = serde_json::from_str(answered.structured.as_deref().unwrap()).unwrap();
         assert_eq!(payload, json!({ "slideId": "newslide" }));
+    }
+
+    #[test]
+    fn add_slide_accepts_all_predefined_layouts() {
+        // Arrange: the two layouts the API defines but the connector used to
+        // reject.
+        for layout in ["CAPTION_ONLY", "SECTION_TITLE_AND_DESCRIPTION"] {
+            let mut stub = Stub::of(&[ok_json(
+                r#"{"replies":[{"createSlide":{"objectId":"newslide"}}]}"#,
+            )]);
+
+            // Act.
+            let answered = call(
+                "addSlide",
+                &format!(r#"{{"presentation_id":"deck1","layout":"{layout}"}}"#),
+                &mut stub,
+            )
+            .unwrap();
+
+            // Assert: the layout reached the API, no placeholder pass needed.
+            assert_eq!(stub.seen.len(), 1);
+            let created: Value = serde_json::from_slice(&stub.seen[0].body).unwrap();
+            assert_eq!(
+                created["requests"][0]["createSlide"]["slideLayoutReference"],
+                json!({ "predefinedLayout": layout })
+            );
+            let payload: Value =
+                serde_json::from_str(answered.structured.as_deref().unwrap()).unwrap();
+            assert_eq!(payload, json!({ "slideId": "newslide" }));
+        }
     }
 
     #[test]

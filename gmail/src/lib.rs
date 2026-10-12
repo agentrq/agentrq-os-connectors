@@ -35,6 +35,9 @@ const MAX_SEARCH_RESULTS: u32 = 50;
 /// How many messages `organizeEmail` resolves when given a bulk `query`.
 const BULK_LIST_LIMIT: u32 = 500;
 
+/// How many message IDs one `messages/batchModify` call takes, per the API.
+const BATCH_MODIFY_LIMIT: usize = 1000;
+
 /// MIME boundaries. Underscores cannot appear in base64, so encoded
 /// attachment content can never collide with them.
 const MIXED_BOUNDARY: &str = "AGENTRQ_MIXED_BOUNDARY";
@@ -1101,35 +1104,50 @@ fn organize_email(
     }
     let mut ids = input.message_ids.clone().unwrap_or_default();
     if let Some(query) = &input.query {
-        let listed = step(
-            send,
-            &get(with_query(
-                &user_url(root, &input.user_id, "messages"),
-                &[
-                    ("q", Some(query.clone())),
-                    ("maxResults", Some(BULK_LIST_LIMIT.to_string())),
-                ],
-            )),
-            "listing messages for the query",
-        )?;
-        for id in message_ids_in(&listed) {
-            if !ids.contains(&id) {
-                ids.push(id);
+        // A query can match more than one page of results: follow
+        // `nextPageToken` so the whole match set is organized, not just the
+        // first page.
+        let mut page_token: Option<String> = None;
+        loop {
+            let listed = step(
+                send,
+                &get(with_query(
+                    &user_url(root, &input.user_id, "messages"),
+                    &[
+                        ("q", Some(query.clone())),
+                        ("maxResults", Some(BULK_LIST_LIMIT.to_string())),
+                        ("pageToken", page_token.clone()),
+                    ],
+                )),
+                "listing messages for the query",
+            )?;
+            for id in message_ids_in(&listed) {
+                if !ids.contains(&id) {
+                    ids.push(id);
+                }
+            }
+            page_token = listed
+                .get("nextPageToken")
+                .and_then(Value::as_str)
+                .map(String::from);
+            if page_token.is_none() {
+                break;
             }
         }
     }
     let threads = input.thread_ids.clone().unwrap_or_default();
     let mut affected: u64 = 0;
-    if !ids.is_empty() {
+    // `batchModify` takes at most 1000 IDs per request: chunk bigger sets.
+    for chunk in ids.chunks(BATCH_MODIFY_LIMIT) {
         step(
             send,
             &post_json(
                 user_url(root, &input.user_id, "messages/batchModify"),
-                &modify_body(Some(&ids), &add, &remove),
+                &modify_body(Some(chunk), &add, &remove),
             ),
             "updating the messages",
         )?;
-        affected += ids.len() as u64;
+        affected += chunk.len() as u64;
     }
     for thread_id in &threads {
         step(
@@ -2486,6 +2504,34 @@ mod tests {
             json!({"ids": ["m1", "m2", "m3"], "addLabelIds": ["TRASH"]})
         );
         assert_eq!(structured(&result)["affectedCount"], 3);
+    }
+
+    #[test]
+    fn organizes_a_multi_page_query() {
+        // Arrange: the query matches two pages of messages.
+        let mut script = Script::new()
+            .will_answer(ok(&json!({
+                "messages": [{"id": "m1"}],
+                "nextPageToken": "tok",
+            })))
+            .will_answer(ok(&json!({"messages": [{"id": "m2"}]})))
+            .will_answer(ok(&json!({})));
+        let result = script.call(
+            "organizeEmail",
+            r#"{"action":"archive","query":"is:unread"}"#,
+        );
+
+        // Assert: both pages were listed, then both messages archived.
+        assert_eq!(script.seen.len(), 3);
+        assert_eq!(
+            script.seen_url(1),
+            "https://www.googleapis.com/gmail/v1/users/me/messages?q=is%3Aunread&maxResults=500&pageToken=tok"
+        );
+        assert_eq!(
+            script.seen_json(2),
+            json!({"ids": ["m1", "m2"], "removeLabelIds": ["INBOX"]})
+        );
+        assert_eq!(structured(&result)["affectedCount"], 2);
     }
 
     #[test]

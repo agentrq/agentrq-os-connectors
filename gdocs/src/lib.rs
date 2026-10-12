@@ -52,6 +52,9 @@ struct CreateDocument {
 struct EditDocument {
     document_id: String,
     edits: Vec<Edit>,
+    /// The tab to edit, as a tab ID or title (see `readDocument`'s `tabs`).
+    /// Without it every edit applies to the first tab, the API default.
+    tab: Option<String>,
 }
 
 /// One typed edit. Indices are UTF-16 code-unit offsets, as the Docs API
@@ -144,54 +147,103 @@ fn read_document(
     parse_read_document(&input, &response)
 }
 
-/// Plans `readDocument`'s `documents.get`: only the title and the structural
-/// content travel back, so the agent is not handed the document's styles and
-/// formatting.
+/// Plans `readDocument`'s `documents.get`: only the title and each tab's
+/// structural content travel back, so the agent is not handed the document's
+/// styles and formatting. `includeTabsContent` is what populates `tabs` at
+/// all — without it the top-level `body` carries the first tab only and
+/// `tabs` comes back empty.
 fn plan_read_document(api: &Api, input: &ReadDocument) -> Result<Request, ConnectorError> {
     Ok(json_get(with_query(
         &api.document(&input.document_id),
-        &[(
-            "fields",
-            Some(String::from("title,body,tabs(documentTab(body))")),
-        )],
+        &[
+            ("includeTabsContent", Some(String::from("true"))),
+            (
+                "fields",
+                Some(String::from(
+                    "title,tabs(tabProperties(tabId,title),documentTab(body),\
+                     childTabs(tabProperties(tabId,title),documentTab(body)))",
+                )),
+            ),
+        ],
     )))
 }
 
 /// The tool result of `readDocument`'s `documents.get`: the document's ID,
-/// title, and plain text.
+/// title, plain text, and the tabs the text came from. A single-tab document
+/// reads exactly as before; with several tabs each tab's text is labeled so
+/// the agent can tell them apart — and target one in `editDocument`.
 fn parse_read_document(
     input: &ReadDocument,
     response: &Response,
 ) -> Result<ToolResponse, ConnectorError> {
     let body: Value = response.json()?;
-    let mut text = String::new();
-    if let Some(content) = body
-        .get("body")
-        .and_then(|body| body.get("content"))
-        .and_then(Value::as_array)
-    {
-        collect_text(content, &mut text);
+    let mut tabs = Vec::new();
+    if let Some(list) = body.get("tabs").and_then(Value::as_array) {
+        collect_tabs(list, &mut tabs);
     }
-    for tab in body
-        .get("tabs")
-        .and_then(Value::as_array)
-        .into_iter()
-        .flatten()
-    {
-        if let Some(content) = tab
-            .get("documentTab")
-            .and_then(|tab| tab.get("body"))
-            .and_then(|body| body.get("content"))
-            .and_then(Value::as_array)
-        {
-            collect_text(content, &mut text);
-        }
-    }
+    let text = if tabs.len() == 1 {
+        tabs[0].text.clone()
+    } else {
+        tabs.iter()
+            .map(|tab| format!("--- Tab: {} ---\n{}", tab.title, tab.text))
+            .collect::<Vec<_>>()
+            .join("\n")
+    };
     ToolResponse::structured(&json!({
         "documentId": &input.document_id,
         "title": body.get("title").and_then(Value::as_str).unwrap_or_default(),
         "text": text,
+        "tabs": tabs.iter().map(|tab| json!({
+            "tabId": tab.tab_id,
+            "title": tab.title,
+        })).collect::<Vec<_>>(),
     }))
+}
+
+/// One tab's plain text, walked out of the tabs tree.
+struct TabContent {
+    tab_id: String,
+    title: String,
+    text: String,
+    /// The index just before the end of the tab's body: where an append
+    /// inserts. Kept so `editDocument` can append to any tab, not just the
+    /// first.
+    end: u32,
+}
+
+/// Flattens the tabs tree depth-first: top-level tabs, then each tab's child
+/// tabs, in UI order.
+fn collect_tabs(list: &[Value], out: &mut Vec<TabContent>) {
+    for tab in list {
+        let properties = tab.get("tabProperties");
+        let tab_id = properties
+            .and_then(|properties| properties.get("tabId"))
+            .and_then(Value::as_str)
+            .unwrap_or_default()
+            .to_string();
+        let title = properties
+            .and_then(|properties| properties.get("title"))
+            .and_then(Value::as_str)
+            .unwrap_or_default()
+            .to_string();
+        let mut text = String::new();
+        let mut end = 1;
+        if let Some(body) = tab.get("documentTab").and_then(|tab| tab.get("body")) {
+            if let Some(content) = body.get("content").and_then(Value::as_array) {
+                collect_text(content, &mut text);
+                end = content_end_index(content);
+            }
+        }
+        out.push(TabContent {
+            tab_id,
+            title,
+            text,
+            end,
+        });
+        if let Some(children) = tab.get("childTabs").and_then(Value::as_array) {
+            collect_tabs(children, out);
+        }
+    }
 }
 
 /// Appends the plain text of structural elements — paragraphs (bulleted or
@@ -316,7 +368,7 @@ fn plan_write_initial_text(
 ) -> Result<Request, ConnectorError> {
     json_post(
         format!("{}:batchUpdate", api.document(document_id)),
-        &json!({ "requests": [insert_text(1, text)] }),
+        &json!({ "requests": [insert_text(1, text, None)] }),
     )
 }
 
@@ -344,22 +396,28 @@ fn combine_create_document(
 // editDocument
 // ---------------------------------------------------------------------------
 
-/// Runs `editDocument`: resolves where appends insert when any edit appends,
-/// then applies every typed edit in one `batchUpdate` call.
+/// Runs `editDocument`: resolves the target tab when one was named, resolves
+/// where appends insert when any edit appends, then applies every typed edit
+/// in one `batchUpdate` call.
 fn edit_document(
     api: &Api,
     request: &ToolRequest,
     send: &mut impl FnMut(&Request) -> Result<Response, ConnectorError>,
 ) -> Result<ToolResponse, ConnectorError> {
     let input: EditDocument = request.json()?;
-    let mut end = match resolve_end_index(api, &input, send) {
-        Ok(end) => end,
-        Err(error) => return Ok(error),
-    };
     if input.edits.is_empty() {
         return combine_edit_document(&input, 0);
     }
-    let planned = plan_edit_document(api, &input, &mut end)?; // coverage: exclude — plan_edit_document builds from serde_json::Value, which serializes infallibly
+    let tab = match resolve_tab(api, &input, send) {
+        Ok(tab) => tab,
+        Err(error) => return Ok(error),
+    };
+    let mut end = match resolve_end_index(api, &input, send, tab.as_ref()) {
+        Ok(end) => end,
+        Err(error) => return Ok(error),
+    };
+    let tab_id = tab.as_ref().map(|tab| tab.tab_id.as_str());
+    let planned = plan_edit_document(api, &input, &mut end, tab_id)?; // coverage: exclude — plan_edit_document builds from serde_json::Value, which serializes infallibly
     match send_step(send, &planned, "applying the edits") {
         Ok(_) => {}
         Err(error) => return Ok(error),
@@ -367,13 +425,82 @@ fn edit_document(
     combine_edit_document(&input, input.edits.len())
 }
 
-/// The index an `append` inserts at: one `documents.get` asking only for the
-/// body's structural ends, then just before the last element's end. Skipped,
+/// `editDocument`'s tab target: the tab's ID, plus the index appends insert
+/// at inside that tab.
+struct TabTarget {
+    tab_id: String,
+    end: u32,
+}
+
+/// Resolves `editDocument`'s optional `tab` — a tab ID or title,
+/// case-insensitive — to its ID. Skipped, answering `None` (the API's first
+/// tab), when the caller named no tab.
+fn resolve_tab(
+    api: &Api,
+    input: &EditDocument,
+    send: &mut impl FnMut(&Request) -> Result<Response, ConnectorError>,
+) -> Result<Option<TabTarget>, ToolResponse> {
+    let Some(want) = input.tab.as_deref() else {
+        return Ok(None);
+    };
+    let planned = json_get(with_query(
+        &api.document(&input.document_id),
+        &[
+            ("includeTabsContent", Some(String::from("true"))),
+            (
+                "fields",
+                Some(String::from(
+                    "tabs(tabProperties(tabId,title),documentTab(body(content(endIndex))),\
+                     childTabs(tabProperties(tabId,title),documentTab(body(content(endIndex)))))",
+                )),
+            ),
+        ],
+    ));
+    let response = send(&planned)
+        .map_err(|error| ToolResponse::error(format!("resolving the tab failed: {error}")))?;
+    step_ok(&response, "resolving the tab")?;
+    let body: Value = response
+        .json()
+        .map_err(|error| ToolResponse::error(format!("resolving the tab failed: {error}")))?;
+    let mut tabs = Vec::new();
+    if let Some(list) = body.get("tabs").and_then(Value::as_array) {
+        collect_tabs(list, &mut tabs);
+    }
+    let mut matches: Vec<&TabContent> = tabs
+        .iter()
+        .filter(|tab| tab.tab_id == want || tab.title.eq_ignore_ascii_case(want))
+        .collect();
+    match matches.pop() {
+        Some(tab) if matches.is_empty() => Ok(Some(TabTarget {
+            tab_id: tab.tab_id.clone(),
+            end: tab.end,
+        })),
+        Some(_) => Err(ToolResponse::error(format!(
+            "Several tabs are titled {want:?}; use a tab ID: {}",
+            tabs.iter()
+                .map(|tab| tab.tab_id.as_str())
+                .collect::<Vec<_>>()
+                .join(", ")
+        ))),
+        None => Err(ToolResponse::error(format!(
+            "No tab {want:?} in this document; its tabs are: {}",
+            tabs.iter()
+                .map(|tab| format!("{} ({})", tab.title, tab.tab_id))
+                .collect::<Vec<_>>()
+                .join(", ")
+        ))),
+    }
+}
+
+/// The index an `append` inserts at: inside the target tab when one was
+/// named, else one `documents.get` asking only for the first tab's
+/// structural ends, then just before the last element's end. Skipped,
 /// answering `None`, when no edit appends.
 fn resolve_end_index(
     api: &Api,
     input: &EditDocument,
     send: &mut impl FnMut(&Request) -> Result<Response, ConnectorError>,
+    tab: Option<&TabTarget>,
 ) -> Result<Option<u32>, ToolResponse> {
     if !input
         .edits
@@ -381,6 +508,9 @@ fn resolve_end_index(
         .any(|edit| matches!(edit, Edit::Append { .. }))
     {
         return Ok(None);
+    }
+    if let Some(tab) = tab {
+        return Ok(Some(tab.end));
     }
     let planned = json_get(with_query(
         &api.document(&input.document_id),
@@ -401,7 +531,15 @@ fn document_end_index(body: &Value) -> u32 {
     body.get("body")
         .and_then(|body| body.get("content"))
         .and_then(Value::as_array)
-        .and_then(|content| content.last())
+        .map(|content| content_end_index(content))
+        .unwrap_or(1)
+}
+
+/// The index just before the end of structural content: where an append
+/// inserts. Empty or unreadable content appends at index 1.
+fn content_end_index(content: &[Value]) -> u32 {
+    content
+        .last()
         .and_then(|element| element.get("endIndex"))
         .and_then(Value::as_u64)
         .map(|end| end.saturating_sub(1))
@@ -410,14 +548,17 @@ fn document_end_index(body: &Value) -> u32 {
 }
 
 /// Plans `editDocument`'s single `batchUpdate` call from the typed edits.
+/// A named tab rides along as the requests' tab target; without one the API
+/// applies everything to the first tab.
 fn plan_edit_document(
     api: &Api,
     input: &EditDocument,
     end: &mut Option<u32>,
+    tab_id: Option<&str>,
 ) -> Result<Request, ConnectorError> {
     let mut requests = Vec::with_capacity(input.edits.len());
     for edit in &input.edits {
-        requests.push(plan_edit(edit, end));
+        requests.push(plan_edit(edit, end, tab_id));
     }
     json_post(
         format!("{}:batchUpdate", api.document(&input.document_id)),
@@ -428,7 +569,7 @@ fn plan_edit_document(
 /// Translates one typed edit into its Docs API batchUpdate request object.
 /// Appends share the resolved end position, advancing past each appended
 /// text so several appends land in order.
-fn plan_edit(edit: &Edit, end: &mut Option<u32>) -> Value {
+fn plan_edit(edit: &Edit, end: &mut Option<u32>, tab_id: Option<&str>) -> Value {
     match edit {
         Edit::Append { text } => {
             // `resolve_end_index` ran because an append is present; without a
@@ -441,53 +582,73 @@ fn plan_edit(edit: &Edit, end: &mut Option<u32>) -> Value {
                 }
                 None => 1,
             };
-            insert_text(index, text)
+            insert_text(index, text, tab_id)
         }
-        Edit::Insert { text, index } => insert_text(*index, text),
+        Edit::Insert { text, index } => insert_text(*index, text, tab_id),
         Edit::Replace {
             find,
             replace,
             match_case,
-        } => replace_text(find, replace, *match_case),
+        } => replace_text(find, replace, *match_case, tab_id),
         Edit::DeleteRange {
             start_index,
             end_index,
-        } => delete_range(*start_index, *end_index),
+        } => delete_range(*start_index, *end_index, tab_id),
     }
 }
 
 /// An `insertText` request object.
-fn insert_text(index: u32, text: &str) -> Value {
+fn insert_text(index: u32, text: &str, tab_id: Option<&str>) -> Value {
+    let mut location = serde_json::Map::with_capacity(2);
+    location.insert("index".to_string(), json!(index));
+    if let Some(tab_id) = tab_id {
+        location.insert("tabId".to_string(), json!(tab_id));
+    }
     json!({
         "insertText": {
-            "location": { "index": index },
+            "location": Value::Object(location),
             "text": text,
         }
     })
 }
 
 /// A `replaceAllText` request object: every occurrence of `find` becomes
-/// `replace`. `matchCase` rides along only when the caller set it.
-fn replace_text(find: &str, replace: &str, match_case: Option<bool>) -> Value {
+/// `replace`. `matchCase` rides along only when the caller set it. Without
+/// a tab target the API replaces across all tabs; a named tab narrows it.
+fn replace_text(
+    find: &str,
+    replace: &str,
+    match_case: Option<bool>,
+    tab_id: Option<&str>,
+) -> Value {
     let mut contains = serde_json::Map::with_capacity(2);
     contains.insert("text".to_string(), Value::from(find));
     if let Some(match_case) = match_case {
         contains.insert("matchCase".to_string(), Value::from(match_case));
     }
+    let mut request = serde_json::Map::with_capacity(3);
+    request.insert("containsText".to_string(), Value::Object(contains));
+    request.insert("replaceText".to_string(), Value::from(replace));
+    if let Some(tab_id) = tab_id {
+        request.insert("tabsCriteria".to_string(), json!({ "tabIds": [tab_id] }));
+    }
     json!({
-        "replaceAllText": {
-            "containsText": Value::Object(contains),
-            "replaceText": replace,
-        }
+        "replaceAllText": Value::Object(request),
     })
 }
 
 /// A `deleteContentRange` request object for `[start_index, end_index)`.
-fn delete_range(start_index: u32, end_index: u32) -> Value {
+fn delete_range(start_index: u32, end_index: u32, tab_id: Option<&str>) -> Value {
+    let mut request = serde_json::Map::with_capacity(2);
+    request.insert(
+        "range".to_string(),
+        json!({ "startIndex": start_index, "endIndex": end_index }),
+    );
+    if let Some(tab_id) = tab_id {
+        request.insert("tabsCriteria".to_string(), json!({ "tabIds": [tab_id] }));
+    }
     json!({
-        "deleteContentRange": {
-            "range": { "startIndex": start_index, "endIndex": end_index }
-        }
+        "deleteContentRange": Value::Object(request),
     })
 }
 
@@ -646,52 +807,59 @@ mod tests {
     /// paragraphs (plain, bulleted at two nesting levels, one without
     /// elements, one with a non-text element), a section break, a table with
     /// a multi-paragraph cell and an empty cell, a row without cells, a table
-    /// without rows, tables of contents with and without content, and tabs.
+    /// without rows, tables of contents with and without content — plus a
+    /// second tab and a child tab, so tab handling is exercised.
     const DOCUMENT_BODY: &str = r#"{
         "title": "Brief",
-        "body": {"content": [
-            {"paragraph": {"elements": [
-                {"inlineObjectElement": {}},
-                {"textRun": {"content": "Hello "}},
-                {"textRun": {"content": "world\n"}}
-            ]}},
-            {"sectionBreak": {}},
-            {"paragraph": {}},
-            {"paragraph": {"bullet": {"listId": "l1", "nestingLevel": 1}, "elements": [
-                {"textRun": {"content": "nested item\n"}}
-            ]}},
-            {"paragraph": {"bullet": {"listId": "l1"}, "elements": [
-                {"textRun": {"content": "top item\n"}}
-            ]}},
-            {"table": {}},
-            {"table": {"tableRows": [
-                {},
-                {"tableCells": [
-                    {"content": [
-                        {"paragraph": {"elements": [{"textRun": {"content": "a1\n"}}]}},
-                        {"paragraph": {"elements": [{"textRun": {"content": "a2"}}]}}
-                    ]},
-                    {"content": [
-                        {"paragraph": {"elements": [{"textRun": {"content": "b1\n"}}]}}
-                    ]},
-                    {}
-                ]}
-            ]}},
-            {"tableOfContents": {}},
-            {"tableOfContents": {"content": [
-                {"paragraph": {"elements": [{"textRun": {"content": "contents"}}]}}
-            ]}}
-        ]},
         "tabs": [
-            {"documentTab": {}},
-            {"documentTab": {"body": {"content": [
+            {"tabProperties": {"tabId": "t.0", "title": "Overview"},
+             "documentTab": {"body": {"content": [
+                {"paragraph": {"elements": [
+                    {"inlineObjectElement": {}},
+                    {"textRun": {"content": "Hello "}},
+                    {"textRun": {"content": "world\n"}}
+                ]}},
+                {"sectionBreak": {}},
+                {"paragraph": {}},
+                {"paragraph": {"bullet": {"listId": "l1", "nestingLevel": 1}, "elements": [
+                    {"textRun": {"content": "nested item\n"}}
+                ]}},
+                {"paragraph": {"bullet": {"listId": "l1"}, "elements": [
+                    {"textRun": {"content": "top item\n"}}
+                ]}},
+                {"table": {}},
+                {"table": {"tableRows": [
+                    {},
+                    {"tableCells": [
+                        {"content": [
+                            {"paragraph": {"elements": [{"textRun": {"content": "a1\n"}}]}},
+                            {"paragraph": {"elements": [{"textRun": {"content": "a2"}}]}}
+                        ]},
+                        {"content": [
+                            {"paragraph": {"elements": [{"textRun": {"content": "b1\n"}}]}}
+                        ]},
+                        {}
+                    ]}
+                ]}},
+                {"tableOfContents": {}},
+                {"tableOfContents": {"content": [
+                    {"paragraph": {"elements": [{"textRun": {"content": "contents"}}]}}
+                ]}}
+            ]}}},
+            {"tabProperties": {"tabId": "t.1", "title": "Details"},
+             "documentTab": {"body": {"content": [
                 {"paragraph": {"elements": [{"textRun": {"content": "tabbed\n"}}]}}
-            ]}}}
+            ]}},
+             "childTabs": [
+                {"tabProperties": {"tabId": "t.2", "title": "Appendix"},
+                 "documentTab": {"body": {"content": [
+                    {"paragraph": {"elements": [{"textRun": {"content": "nested\n"}}]}}
+                ]}}}
+             ]}
         ]
     }"#;
 
-    const DOCUMENT_TEXT: &str =
-        "Hello world\n  - nested item\n- top item\na1 a2\tb1\t\ncontents\ntabbed\n";
+    const DOCUMENT_TEXT: &str = "--- Tab: Overview ---\nHello world\n  - nested item\n- top item\na1 a2\tb1\t\ncontents\n\n--- Tab: Details ---\ntabbed\n\n--- Tab: Appendix ---\nnested\n";
 
     #[test]
     fn reads_a_document_as_plain_text() {
@@ -701,18 +869,51 @@ mod tests {
         // Act.
         let answered = call("readDocument", r#"{"documentId":"abc"}"#, &mut stub).unwrap();
 
-        // Assert: one GET asking only for the title and the content, and the
-        // walked plain text.
+        // Assert: one GET asking for the title and every tab's content, and
+        // the walked plain text labeled per tab.
         assert_eq!(stub.seen.len(), 1);
         assert_eq!(stub.seen[0].method, Method::Get);
         assert_eq!(
             stub.seen[0].url,
-            format!("{API}/abc?fields=title%2Cbody%2Ctabs%28documentTab%28body%29%29")
+            format!(
+                "{API}/abc?includeTabsContent=true&fields=title%2Ctabs%28tabProperties%28tabId%2Ctitle%29\
+                 %2CdocumentTab%28body%29%2CchildTabs%28tabProperties%28tabId%2Ctitle%29%2CdocumentTab%28body%29%29%29"
+            )
         );
         let parsed: Value = serde_json::from_str(structured(&answered)).unwrap();
         assert_eq!(parsed["documentId"], json!("abc"));
         assert_eq!(parsed["title"], json!("Brief"));
         assert_eq!(parsed["text"], json!(DOCUMENT_TEXT));
+        assert_eq!(
+            parsed["tabs"],
+            json!([
+                {"tabId": "t.0", "title": "Overview"},
+                {"tabId": "t.1", "title": "Details"},
+                {"tabId": "t.2", "title": "Appendix"},
+            ])
+        );
+    }
+
+    #[test]
+    fn reads_a_single_tab_without_labels() {
+        // Arrange: a document with one tab.
+        let mut stub = Stub::of(&[ok_json(
+            r#"{
+            "title": "Solo",
+            "tabs": [{"tabProperties": {"tabId": "t.0", "title": "Only"},
+                      "documentTab": {"body": {"content": [
+                        {"paragraph": {"elements": [{"textRun": {"content": "alone\n"}}]}}
+                      ]}}}]
+        }"#,
+        )]);
+
+        // Act.
+        let answered = call("readDocument", r#"{"documentId":"abc"}"#, &mut stub).unwrap();
+
+        // Assert: plain text with no tab labels, exactly as before.
+        let parsed: Value = serde_json::from_str(structured(&answered)).unwrap();
+        assert_eq!(parsed["text"], json!("alone\n"));
+        assert_eq!(parsed["tabs"], json!([{"tabId": "t.0", "title": "Only"}]));
     }
 
     #[test]
@@ -723,10 +924,10 @@ mod tests {
         // Act.
         let answered = call("readDocument", r#"{"documentId":"abc"}"#, &mut stub).unwrap();
 
-        // Assert: empty text, and the title it did return.
+        // Assert: empty text, no tabs, and the title it did return.
         assert_eq!(
             structured(&answered),
-            r#"{"documentId":"abc","text":"","title":"Empty"}"#
+            r#"{"documentId":"abc","tabs":[],"text":"","title":"Empty"}"#
         );
 
         // Arrange: no title either.
@@ -738,7 +939,7 @@ mod tests {
         // Assert: the missing title defaults to empty.
         assert_eq!(
             structured(&answered),
-            r#"{"documentId":"abc","text":"","title":""}"#
+            r#"{"documentId":"abc","tabs":[],"text":"","title":""}"#
         );
     }
 
@@ -1002,12 +1203,156 @@ mod tests {
     }
 
     #[test]
+    fn targets_a_named_tab_for_edits() {
+        // Arrange: two tabs; the edits name the second by title.
+        let tabs = r#"{"tabs":[
+            {"tabProperties": {"tabId": "t.0", "title": "Overview"},
+             "documentTab": {"body": {"content": [{"endIndex": 5}]}}},
+            {"tabProperties": {"tabId": "t.1", "title": "Details"},
+             "documentTab": {"body": {"content": [{"endIndex": 12}]}}}
+        ]}"#;
+        let mut stub = Stub::of(&[ok_json(tabs), ok_json(r#"{"replies":[{}]}"#)]);
+
+        // Act.
+        call(
+            "editDocument",
+            r#"{"documentId":"abc","tab":"details","edits":[
+                {"op":"append","text":"Hi"},
+                {"op":"insert","text":"yo","index":3},
+                {"op":"deleteRange","startIndex":1,"endIndex":4},
+                {"op":"replace","find":"a","replace":"b"}
+            ]}"#,
+            &mut stub,
+        )
+        .unwrap();
+
+        // Assert: the tab resolved case-insensitively by title, the append
+        // lands at that tab's end, and every request carries the tab target.
+        assert!(stub.seen[0].url.contains("includeTabsContent=true"));
+        assert_eq!(
+            body_of(&stub, 1)["requests"],
+            json!([
+                {"insertText": {"location": {"index": 11, "tabId": "t.1"}, "text": "Hi"}},
+                {"insertText": {"location": {"index": 3, "tabId": "t.1"}, "text": "yo"}},
+                {"deleteContentRange": {
+                    "range": {"startIndex": 1, "endIndex": 4},
+                    "tabsCriteria": {"tabIds": ["t.1"]},
+                }},
+                {"replaceAllText": {
+                    "containsText": {"text": "a"},
+                    "replaceText": "b",
+                    "tabsCriteria": {"tabIds": ["t.1"]},
+                }},
+            ])
+        );
+    }
+
+    #[test]
+    fn reports_tab_resolution_failures_as_tool_errors() {
+        // Arrange: resolving the tab refuses.
+        let mut stub = Stub::of(&[response(404, "not found")]);
+
+        // Act.
+        let refused = call(
+            "editDocument",
+            r#"{"documentId":"abc","tab":"Details","edits":[{"op":"append","text":"Hi"}]}"#,
+            &mut stub,
+        )
+        .unwrap();
+
+        // Assert: a tool error from the tab lookup, before the batch.
+        assert!(refused.structured.is_none());
+        assert_eq!(stub.seen.len(), 1);
+
+        // Arrange: the tab lookup answers garbage.
+        let mut stub = Stub::of(&[ok_json("<html>")]);
+
+        // Act.
+        let garbled = call(
+            "editDocument",
+            r#"{"documentId":"abc","tab":"Details","edits":[{"op":"append","text":"Hi"}]}"#,
+            &mut stub,
+        )
+        .unwrap();
+
+        // Assert: a tool error from the tab lookup.
+        assert!(garbled.structured.is_none());
+        assert_eq!(stub.seen.len(), 1);
+
+        // Arrange: no response queued, so the lookup's send fails.
+        let mut stub = Stub::of(&[]);
+
+        // Act.
+        let unsent = call(
+            "editDocument",
+            r#"{"documentId":"abc","tab":"Details","edits":[{"op":"append","text":"Hi"}]}"#,
+            &mut stub,
+        )
+        .unwrap();
+
+        // Assert: a tool error from the tab lookup's failed send.
+        assert!(unsent.structured.is_none());
+    }
+
+    #[test]
+    fn reports_unknown_or_ambiguous_tabs() {
+        // Arrange: two tabs.
+        let tabs = r#"{"tabs":[
+            {"tabProperties": {"tabId": "t.0", "title": "Overview"}, "documentTab": {}},
+            {"tabProperties": {"tabId": "t.1", "title": "Details"}, "documentTab": {}}
+        ]}"#;
+
+        // Act: a tab that matches nothing.
+        let mut stub = Stub::of(&[ok_json(tabs)]);
+        let refused = call(
+            "editDocument",
+            r#"{"documentId":"abc","tab":"Nope","edits":[{"op":"append","text":"Hi"}]}"#,
+            &mut stub,
+        )
+        .unwrap();
+
+        // Assert: a tool error after the tab lookup, before the batch.
+        assert!(refused.structured.is_none());
+        assert_eq!(stub.seen.len(), 1);
+
+        // Arrange: two tabs sharing a title, one with a body but no content.
+        let dupes = r#"{"tabs":[
+            {"tabProperties": {"tabId": "t.0", "title": "Same"}, "documentTab": {"body": {}}},
+            {"tabProperties": {"tabId": "t.1", "title": "Same"}, "documentTab": {}}
+        ]}"#;
+        let mut stub = Stub::of(&[ok_json(dupes)]);
+        let ambiguous = call(
+            "editDocument",
+            r#"{"documentId":"abc","tab":"same","edits":[{"op":"append","text":"Hi"}]}"#,
+            &mut stub,
+        )
+        .unwrap();
+
+        // Assert: a tool error asking for a tab ID.
+        assert!(ambiguous.structured.is_none());
+        assert_eq!(stub.seen.len(), 1);
+
+        // Arrange: the tab lookup answers without any tabs.
+        let mut stub = Stub::of(&[ok_json(r#"{"title":"Brief"}"#)]);
+        let no_tabs = call(
+            "editDocument",
+            r#"{"documentId":"abc","tab":"Details","edits":[{"op":"append","text":"Hi"}]}"#,
+            &mut stub,
+        )
+        .unwrap();
+
+        // Assert: a tool error naming the document's (lack of) tabs.
+        assert!(no_tabs.structured.is_none());
+        assert_eq!(stub.seen.len(), 1);
+    }
+
+    #[test]
     fn plans_an_append_without_a_resolved_position_at_one() {
         // Arrange: plan_edit called directly, without resolve_end_index.
         let edit: Edit = serde_json::from_str(r#"{"op":"append","text":"Hi"}"#).unwrap();
 
         // Act.
-        let planned = plan_edit(&edit, &mut None);
+        let planned = plan_edit(&edit, &mut None, None);
 
         // Assert: the defensive default inserts at the body's start.
         assert_eq!(

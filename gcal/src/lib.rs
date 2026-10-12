@@ -39,6 +39,7 @@ struct ListEvents {
     max_results: Option<i64>,
     single_events: Option<bool>,
     order_by: Option<String>,
+    page_token: Option<String>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -167,6 +168,7 @@ fn plan_list_events(api: &Api, request: &ToolRequest) -> Result<Request, Connect
                 input.single_events.map(|single| single.to_string()),
             ),
             ("orderBy", input.order_by),
+            ("pageToken", input.page_token),
         ],
     )))
 }
@@ -726,6 +728,30 @@ mod tests {
             format!(
                 "{API}/calendars/primary/events?timeMin=2026-10-11T00%3A00%3A00-07%3A00&timeMax=2026-10-18T00%3A00%3A00-07%3A00&q=standup&maxResults=25&singleEvents=true&orderBy=startTime"
             )
+        );
+    }
+
+    #[test]
+    fn lists_events_with_a_page_token() {
+        // Arrange.
+        let mut stub = Stub::of(&[ok_json(r#"{"items":[],"nextPageToken":"CAo"}"#)]);
+
+        // Act: continue a previous listing.
+        let answered = call(
+            "listEvents",
+            r#"{"calendarId":"primary","pageToken":"CBo"}"#,
+            &mut stub,
+        )
+        .unwrap();
+
+        // Assert: the token rides along, and the next one comes back through.
+        assert_eq!(
+            stub.seen[0].url,
+            format!("{API}/calendars/primary/events?pageToken=CBo")
+        );
+        assert_eq!(
+            answered.structured.as_deref(),
+            Some(r#"{"items":[],"nextPageToken":"CAo"}"#)
         );
     }
 
