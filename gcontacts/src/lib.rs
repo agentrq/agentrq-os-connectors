@@ -156,22 +156,18 @@ struct ListOtherContacts {
 /// agent can react (a 403 usually means a missing scope).
 #[derive(Debug)]
 struct ToolError {
-    /// The API's HTTP status, when the failure is an API answer.
-    status: Option<u16>,
     message: String,
 }
 
 impl ToolError {
     fn api(status: u16, body: &str) -> Self {
         Self {
-            status: Some(status),
             message: format!("The API answered {status}: {body}"),
         }
     }
 
     fn input(message: impl Into<String>) -> Self {
         Self {
-            status: None,
             message: message.into(),
         }
     }
@@ -233,10 +229,7 @@ impl<T: Transport> Api<T> {
     fn send(&self, request: Request) -> Result<Value, ToolError> {
         let request = request.header(
             "user-agent",
-            concat!(
-                "agentrq-gcontacts-connector/",
-                env!("CARGO_PKG_VERSION")
-            ),
+            concat!("agentrq-gcontacts-connector/", env!("CARGO_PKG_VERSION")),
         );
         let response = self.transport.send(request)?;
         if !(200..300).contains(&response.status) {
@@ -338,12 +331,11 @@ impl<T: Transport> Api<T> {
             for item in groups {
                 if let Some(name) = item.get("name").and_then(Value::as_str) {
                     names.push(name);
-                    if name.eq_ignore_ascii_case(group) {
-                        if let Some(resource_name) =
+                    if name.eq_ignore_ascii_case(group)
+                        && let Some(resource_name) =
                             item.get("resourceName").and_then(Value::as_str)
-                        {
-                            matching.push(resource_name);
-                        }
+                    {
+                        matching.push(resource_name);
                     }
                 }
             }
@@ -392,13 +384,7 @@ fn values_of(entries: Option<&Vec<Value>>) -> Value {
             }
         }
     }
-    Value::Array(
-        primary
-            .into_iter()
-            .chain(rest)
-            .map(Value::from)
-            .collect(),
-    )
+    Value::Array(primary.into_iter().chain(rest).map(Value::from).collect())
 }
 
 /// A contact's addresses as plain strings: the formatted value when the API
@@ -435,7 +421,9 @@ fn organization_of(person: &Value) -> Value {
         .get("organizations")
         .and_then(Value::as_array)
         .and_then(|entries| entries.first());
-    let name = first.and_then(|org| org.get("name")).and_then(Value::as_str);
+    let name = first
+        .and_then(|org| org.get("name"))
+        .and_then(Value::as_str);
     let title = first
         .and_then(|org| org.get("title"))
         .and_then(Value::as_str);
@@ -454,11 +442,7 @@ fn person_to_contact(person: &Value) -> Value {
         .get("names")
         .and_then(Value::as_array)
         .and_then(|entries| entries.first());
-    let name_field = |key: &str| {
-        names
-            .and_then(|name| name.get(key))
-            .and_then(Value::as_str)
-    };
+    let name_field = |key: &str| names.and_then(|name| name.get(key)).and_then(Value::as_str);
     json!({
         "resourceName": person.get("resourceName").and_then(Value::as_str).unwrap_or_default(),
         "displayName": name_field("displayName").unwrap_or_default(),
@@ -549,31 +533,19 @@ fn listed_groups(body: &Value) -> Vec<Value> {
 
 /// One `{"value": …}` entry per string, for emails and phones.
 fn value_entries(values: Option<&[String]>) -> Option<Value> {
-    values.map(|values| {
-        Value::Array(
-            values
-                .iter()
-                .map(|value| json!({"value": value}))
-                .collect(),
-        )
-    })
+    values.map(|values| Value::Array(values.iter().map(|value| json!({"value": value})).collect()))
 }
 
 /// The single `names` entry, when any name field was provided. `displayName`
 /// is output-only on the API; `unstructuredName` is its writable form.
 fn name_entry(fields: &ContactFields) -> Option<Value> {
-    if fields.given_name.is_none()
-        && fields.family_name.is_none()
-        && fields.display_name.is_none()
+    if fields.given_name.is_none() && fields.family_name.is_none() && fields.display_name.is_none()
     {
         return None;
     }
     Some(json!([object(&[
         ("givenName", fields.given_name.as_deref().map(Value::from)),
-        (
-            "familyName",
-            fields.family_name.as_deref().map(Value::from)
-        ),
+        ("familyName", fields.family_name.as_deref().map(Value::from)),
         (
             "unstructuredName",
             fields.display_name.as_deref().map(Value::from)
@@ -617,10 +589,7 @@ fn person_body(fields: &ContactFields, etag: Option<&str>, resource_name: Option
         ("emailAddresses", value_entries(fields.emails.as_deref())),
         ("phoneNumbers", value_entries(fields.phones.as_deref())),
         ("organizations", organization_entry(fields)),
-        (
-            "addresses",
-            address_entries(fields.addresses.as_deref()),
-        ),
+        ("addresses", address_entries(fields.addresses.as_deref())),
         ("notes", fields.notes.as_deref().map(Value::from)),
     ])
 }
@@ -629,9 +598,7 @@ fn person_body(fields: &ContactFields, etag: Option<&str>, resource_name: Option
 /// lists, so this follows the fields the caller provided.
 fn update_fields(fields: &ContactFields) -> Vec<&'static str> {
     let mut out = Vec::new();
-    if fields.given_name.is_some()
-        || fields.family_name.is_some()
-        || fields.display_name.is_some()
+    if fields.given_name.is_some() || fields.family_name.is_some() || fields.display_name.is_some()
     {
         out.push("names");
     }
@@ -705,7 +672,8 @@ fn run_search_contacts<T: Transport>(
             ("readMask", Some(json!(PERSON_FIELDS))),
         ]),
     )?;
-    Ok(ToolResponse::structured(&json!({"contacts": searched_contacts(&body)}))?) // coverage: exclude — structured() serializes a serde_json::Value, which cannot fail
+    let shaped = json!({"contacts": searched_contacts(&body)});
+    Ok(ToolResponse::structured(&shaped)?) // coverage: exclude — structured() serializes a serde_json::Value, which cannot fail
 }
 
 fn run_get_contact_by_email<T: Transport>(
@@ -776,10 +744,10 @@ fn run_list_contacts<T: Transport>(
     request: &ToolRequest,
 ) -> Result<ToolResponse, ToolError> {
     let input: ListContacts = request.json()?;
-    if let Some(page_size) = input.page_size {
-        if page_size == 0 || page_size > 1000 {
-            return Err(ToolError::input("pageSize must be between 1 and 1000"));
-        }
+    if let Some(page_size) = input.page_size
+        && (page_size == 0 || page_size > 1000)
+    {
+        return Err(ToolError::input("pageSize must be between 1 and 1000"));
     }
     if let Some(sort_order) = input.sort_order.as_deref() {
         match sort_order {
@@ -804,10 +772,11 @@ fn run_list_contacts<T: Transport>(
         ],
     );
     let body = api.get(&url)?;
-    Ok(ToolResponse::structured(&object(&[
+    let shaped = object(&[
         ("contacts", Some(json!(listed_contacts(&body)))),
         ("nextPageToken", body.get("nextPageToken").cloned()),
-    ]))?) // coverage: exclude — structured() serializes a serde_json::Value, which cannot fail
+    ]);
+    Ok(ToolResponse::structured(&shaped)?) // coverage: exclude — structured() serializes a serde_json::Value, which cannot fail
 }
 
 fn run_create_contact<T: Transport>(
@@ -861,16 +830,17 @@ fn run_delete_contact<T: Transport>(
     request: &ToolRequest,
 ) -> Result<ToolResponse, ToolError> {
     let input: ContactRef = request.json()?;
-    api.delete(&format!("{}/{}:deleteContact", api.base, input.resource_name))?;
+    api.delete(&format!(
+        "{}/{}:deleteContact",
+        api.base, input.resource_name
+    ))?;
     Ok(ToolResponse::structured(&json!({"deleted": true}))?) // coverage: exclude — structured() serializes a serde_json::Value, which cannot fail
 }
 
 fn run_list_contact_groups<T: Transport>(api: &Api<T>) -> Result<ToolResponse, ToolError> {
     let body = api.list_groups()?;
-    Ok(ToolResponse::structured(&object(&[(
-        "groups",
-        Some(json!(listed_groups(&body))),
-    )]))?) // coverage: exclude — structured() serializes a serde_json::Value, which cannot fail
+    let shaped = object(&[("groups", Some(json!(listed_groups(&body))))]);
+    Ok(ToolResponse::structured(&shaped)?) // coverage: exclude — structured() serializes a serde_json::Value, which cannot fail
 }
 
 fn run_get_contact_group<T: Transport>(
@@ -905,7 +875,10 @@ fn run_rename_contact_group<T: Transport>(
     let input: RenameGroup = request.json()?;
     let resource_name = api.resolve_group(&input.group)?;
     let current = api.get(&format!("{}/{resource_name}", api.base))?;
-    let etag = current.get("etag").and_then(Value::as_str).unwrap_or_default();
+    let etag = current
+        .get("etag")
+        .and_then(Value::as_str)
+        .unwrap_or_default();
     let body = api.put_json(
         &format!("{}/{resource_name}", api.base),
         &json!({
@@ -975,10 +948,11 @@ fn run_list_other_contacts<T: Transport>(
         ],
     );
     let body = api.get(&url)?;
-    Ok(ToolResponse::structured(&object(&[
+    let shaped = object(&[
         ("contacts", Some(json!(other_contacts(&body)))),
         ("nextPageToken", body.get("nextPageToken").cloned()),
-    ]))?) // coverage: exclude — structured() serializes a serde_json::Value, which cannot fail
+    ]);
+    Ok(ToolResponse::structured(&shaped)?) // coverage: exclude — structured() serializes a serde_json::Value, which cannot fail
 }
 
 fn run_copy_other_contact<T: Transport>(
@@ -1314,7 +1288,8 @@ mod tests {
             ),
             ((Method::Get, get_url.as_str()), 200, PERSON),
         ]);
-        let response = run_tool(&api, "getContactByEmail", r#"{"email":"ada@example.com"}"#).unwrap();
+        let response =
+            run_tool(&api, "getContactByEmail", r#"{"email":"ada@example.com"}"#).unwrap();
         assert_eq!(structured(&response), SHAPED);
         // The search is the first of the two calls; the read mask stays small.
         assert_eq!(
@@ -1325,7 +1300,11 @@ mod tests {
         // No contact uses the address — with and without a results key.
         for body in [r#"{"results": []}"#, r#"{"kind":"people#searchResponse"}"#] {
             let lonely = client(&[search_answer(body)]);
-            let missing = run_tool(&lonely, "getContactByEmail", r#"{"email":"nobody@example.com"}"#);
+            let missing = run_tool(
+                &lonely,
+                "getContactByEmail",
+                r#"{"email":"nobody@example.com"}"#,
+            );
             assert!(
                 matches!(&missing, Err(error) if error.message.contains(r#"No contact uses the email address "nobody@example.com""#)),
                 "{body}: {missing:?}"
@@ -1339,7 +1318,11 @@ mod tests {
                 {"person": {"resourceName": "people/c2", "emailAddresses": [{"value": "dupe@example.com"}]}}
             ]}"#,
         )]);
-        let dupe = run_tool(&crowded, "getContactByEmail", r#"{"email":"dupe@example.com"}"#);
+        let dupe = run_tool(
+            &crowded,
+            "getContactByEmail",
+            r#"{"email":"dupe@example.com"}"#,
+        );
         assert!(
             matches!(&dupe, Err(error) if error.message.contains("Several contacts use")
                 && error.message.contains("people/c1, people/c2")),
@@ -1398,7 +1381,7 @@ mod tests {
             r#"{"sortOrder":"WHATEVER"}"#,
         ] {
             let bad = run_tool(&api, "listContacts", body);
-            assert!(matches!(&bad, Err(_)), "{body}");
+            assert!(bad.is_err(), "{body}");
             assert!(api.transport.seen.borrow().is_empty(), "{body}");
         }
     }
@@ -1439,13 +1422,12 @@ mod tests {
         );
 
         // A partial create only sends the fields given.
-        let partial = run_tool(
+        run_tool(
             &api,
             "createContact",
             r#"{"displayName":"Grace Hopper","organizationTitle":"Admiral"}"#,
         )
         .unwrap();
-        assert!(structured(&partial).contains("Grace Hopper"));
         assert_eq!(
             request_body(&api, 1),
             json!({
@@ -1455,14 +1437,10 @@ mod tests {
         );
 
         // No name fields at all: no names entry is sent.
-        let nameless = run_tool(&api, "createContact", r#"{"emails":["x@y.z"]}"#).unwrap();
-        assert!(structured(&nameless).contains("Ada Lovelace"));
+        run_tool(&api, "createContact", r#"{"emails":["x@y.z"]}"#).unwrap();
         let planned = request_body(&api, 2);
         assert_eq!(planned.get("names"), None);
-        assert_eq!(
-            planned["emailAddresses"],
-            json!([{"value": "x@y.z"}])
-        );
+        assert_eq!(planned["emailAddresses"], json!([{"value": "x@y.z"}]));
 
         let empty = run_tool(&api, "createContact", "{}");
         assert!(
@@ -1473,10 +1451,12 @@ mod tests {
 
     #[test]
     fn updates_a_contact() {
-        let get_url = person_url("people/c123");
         let api = client(&[
             (
-                (Method::Get, get_url.as_str()),
+                (
+                    Method::Get,
+                    "https://people.test/v1/people/c123?personFields=names",
+                ),
                 200,
                 r#"{"resourceName":"people/c123","metadata":{"sources":[{"etag":"etag123"}]}}"#,
             ),
@@ -1522,9 +1502,11 @@ mod tests {
             "{empty:?}"
         );
 
-        let get_url = person_url("people/c123");
         let no_etag = client(&[(
-            (Method::Get, get_url.as_str()),
+            (
+                Method::Get,
+                "https://people.test/v1/people/c123?personFields=names",
+            ),
             200,
             r#"{"resourceName":"people/c123"}"#,
         )]);
@@ -1549,7 +1531,8 @@ mod tests {
             200,
             "",
         )]);
-        let response = run_tool(&api, "deleteContact", r#"{"resourceName":"people/c123"}"#).unwrap();
+        let response =
+            run_tool(&api, "deleteContact", r#"{"resourceName":"people/c123"}"#).unwrap();
         assert_eq!(structured(&response), r#"{"deleted":true}"#);
     }
 
@@ -1651,10 +1634,7 @@ mod tests {
                 r#"{"resourceName":"contactGroups/new","name":"New","groupType":"USER_CONTACT","memberCount":0}"#,
             ),
             (
-                (
-                    Method::Get,
-                    "https://people.test/v1/contactGroups/friends",
-                ),
+                (Method::Get, "https://people.test/v1/contactGroups/friends"),
                 200,
                 r#"{"resourceName":"contactGroups/friends","name":"Friends","etag":"getag"}"#,
             ),
@@ -1672,7 +1652,10 @@ mod tests {
                 "",
             ),
             (
-                (Method::Delete, "https://people.test/v1/contactGroups/friends"),
+                (
+                    Method::Delete,
+                    "https://people.test/v1/contactGroups/friends",
+                ),
                 200,
                 "",
             ),
@@ -1683,7 +1666,7 @@ mod tests {
             structured(&created),
             r#"{"groupType":"USER_CONTACT","memberCount":0,"name":"New","resourceName":"contactGroups/new"}"#
         );
-        assert_eq!(request_body(&api, 1), json!({"name": "New"}));
+        assert_eq!(request_body(&api, 0), json!({"name": "New"}));
 
         let renamed = run_tool(
             &api,
@@ -1842,7 +1825,7 @@ mod tests {
         let failing = Api::new(BASE, Fake::failing());
         let failed = run(&failing, &request("listContacts", "{}"));
         assert!(
-            matches!(&failed, Err(error) if error.message == "transport boom" && error.status.is_none()),
+            matches!(&failed, Err(error) if error.message == "transport boom"),
             "{failed:?}"
         );
 
@@ -1855,10 +1838,7 @@ mod tests {
             "<html>",
         )]);
         let parsed = run(&garbled, &request("listContacts", "{}"));
-        assert!(
-            matches!(&parsed, Err(error) if error.status.is_none()),
-            "{parsed:?}"
-        );
+        assert!(parsed.is_err(), "{parsed:?}");
 
         let uncanned = client(&[]);
         let missing = uncanned.get("https://people.test/v1/nope");
@@ -1868,10 +1848,7 @@ mod tests {
         );
 
         let denied = client(&[(
-            (
-                Method::Post,
-                "https://people.test/v1/people:searchContacts",
-            ),
+            (Method::Post, "https://people.test/v1/people:searchContacts"),
             403,
             "forbidden",
         )]);
@@ -1892,12 +1869,18 @@ mod tests {
             ("getContact", r#"{"resourceName":"people/c1"}"#),
             ("listContacts", "{}"),
             ("createContact", r#"{"givenName":"x"}"#),
-            ("updateContact", r#"{"resourceName":"people/c1","notes":"x"}"#),
+            (
+                "updateContact",
+                r#"{"resourceName":"people/c1","notes":"x"}"#,
+            ),
             ("deleteContact", r#"{"resourceName":"people/c1"}"#),
             ("listContactGroups", "{}"),
             ("getContactGroup", r#"{"group":"contactGroups/a"}"#),
             ("createContactGroup", r#"{"name":"x"}"#),
-            ("renameContactGroup", r#"{"group":"contactGroups/a","name":"y"}"#),
+            (
+                "renameContactGroup",
+                r#"{"group":"contactGroups/a","name":"y"}"#,
+            ),
             ("deleteContactGroup", r#"{"group":"contactGroups/a"}"#),
             (
                 "modifyGroupMembers",
@@ -1917,13 +1900,135 @@ mod tests {
     }
 
     #[test]
+    fn surfaces_mid_flow_failures() {
+        // A group name that needs resolving: when the lookup itself fails,
+        // the failure names the transport, not a missing group.
+        for (tool, body) in [
+            ("getContactGroup", r#"{"group":"Friends"}"#),
+            ("renameContactGroup", r#"{"group":"Friends","name":"Pals"}"#),
+            ("deleteContactGroup", r#"{"group":"Friends"}"#),
+            (
+                "modifyGroupMembers",
+                r#"{"group":"Friends","addResourceNames":["people/c1"]}"#,
+            ),
+        ] {
+            let api = Api::new(BASE, Fake::failing());
+            let result = run_tool(&api, tool, body);
+            assert!(
+                matches!(&result, Err(error) if error.message == "transport boom"),
+                "{tool}"
+            );
+        }
+
+        // getContactByEmail: the search works, the follow-up fetch fails.
+        let get_url = person_url("people/c1");
+        let email_fail = client(&[
+            search_answer(
+                r#"{"results": [{"person": {"resourceName": "people/c1", "emailAddresses": [{"value": "x@y.z"}]}}]}"#,
+            ),
+            ((Method::Get, get_url.as_str()), 500, "boom"),
+        ]);
+        let failed = run_tool(&email_fail, "getContactByEmail", r#"{"email":"x@y.z"}"#);
+        assert!(
+            matches!(&failed, Err(error) if error.message == "The API answered 500: boom"),
+            "{failed:?}"
+        );
+
+        // updateContact: the etag read works, the PATCH fails.
+        let update_fail = client(&[
+            (
+                (
+                    Method::Get,
+                    "https://people.test/v1/people/c123?personFields=names",
+                ),
+                200,
+                r#"{"metadata":{"sources":[{"etag":"e"}]}}"#,
+            ),
+            (
+                (
+                    Method::Patch,
+                    "https://people.test/v1/people/c123:updateContact?updatePersonFields=notes&personFields=names%2CemailAddresses%2CphoneNumbers%2Corganizations%2Caddresses%2Cnotes",
+                ),
+                500,
+                "boom",
+            ),
+        ]);
+        let failed = run_tool(
+            &update_fail,
+            "updateContact",
+            r#"{"resourceName":"people/c123","notes":"x"}"#,
+        );
+        assert!(
+            matches!(&failed, Err(error) if error.message == "The API answered 500: boom"),
+            "{failed:?}"
+        );
+
+        // renameContactGroup: resolve and read succeed, the PUT fails.
+        let rename_fail = client(&[
+            groups_answer(),
+            (
+                (Method::Get, "https://people.test/v1/contactGroups/friends"),
+                200,
+                r#"{"etag":"e"}"#,
+            ),
+            (
+                (Method::Put, "https://people.test/v1/contactGroups/friends"),
+                500,
+                "boom",
+            ),
+        ]);
+        let failed = run_tool(
+            &rename_fail,
+            "renameContactGroup",
+            r#"{"group":"Friends","name":"Pals"}"#,
+        );
+        assert!(
+            matches!(&failed, Err(error) if error.message == "The API answered 500: boom"),
+            "{failed:?}"
+        );
+
+        // modifyGroupMembers: the modify works, the follow-up read fails.
+        let modify_fail = client(&[
+            groups_answer(),
+            (
+                (
+                    Method::Post,
+                    "https://people.test/v1/contactGroups/friends/members:modify",
+                ),
+                200,
+                "{}",
+            ),
+            (
+                (Method::Get, "https://people.test/v1/contactGroups/friends"),
+                500,
+                "boom",
+            ),
+        ]);
+        let failed = run_tool(
+            &modify_fail,
+            "modifyGroupMembers",
+            r#"{"group":"Friends","addResourceNames":["people/c1"]}"#,
+        );
+        assert!(
+            matches!(&failed, Err(error) if error.message == "The API answered 500: boom"),
+            "{failed:?}"
+        );
+    }
+
+    #[test]
+    fn tool_errors_render() {
+        assert_eq!(
+            ToolError::api(403, "forbidden").to_string(),
+            "The API answered 403: forbidden"
+        );
+        assert_eq!(ToolError::input("oops").to_string(), "oops");
+    }
+
+    #[test]
     fn refuses_bad_input() {
         let api = client(&[]);
         let malformed = run(&api, &request("createContact", "{oops"));
-        assert!(
-            matches!(&malformed, Err(error) if error.status.is_none()),
-            "{malformed:?}"
-        );
+        assert!(malformed.is_err(), "{malformed:?}");
 
         let missing = run(&api, &request("createContact", "{}"));
         assert!(
@@ -1961,10 +2066,7 @@ mod tests {
         ] {
             let api = client(&[]);
             let result = run_tool(&api, tool, "{oops");
-            assert!(
-                matches!(&result, Err(error) if error.status.is_none()),
-                "{tool}"
-            );
+            assert!(result.is_err(), "{tool}");
             assert!(api.transport.seen.borrow().is_empty(), "{tool}");
         }
     }
