@@ -291,13 +291,14 @@ Two GitHub limits shape it:
 This repository is held to the same rule as any other. It is listed only when its
 latest release carries a `<connector name>.wasm` for **every** connector in
 [`connectors-manifest.json`](connectors-manifest.json). Releases come from
-[`release.yml`](.github/workflows/release.yml):
+[`release.yml`](.github/workflows/release.yml), and nobody has to cut them by
+hand. A push to `main` that changes a connector (its `src/`, `Cargo.toml`,
+`Cargo.lock` or `manifest.json`) or the index publishes a new release tagged
+`v<YYYY.MM.DD>-<short sha>`. A pull request with the same changes only builds.
+A tag pushed by hand (`git tag v0.2.0 && git push origin v0.2.0`) and **Run
+workflow** in the Actions tab release too.
 
-```sh
-git tag v0.2.0 && git push origin v0.2.0   # or run "Release" from the Actions tab
-```
-
-That workflow builds each connector for `wasm32-wasip2` against the **real**
+The workflow builds each connector for `wasm32-wasip2` against the **real**
 `connectors-sdk` from `agentrq/connectors`, publishes the components as the
 release, and starts a catalogue rebuild. The `sdk/connectors-sdk` in this
 repository is a test double, and its `export_connector!` exports nothing. Since

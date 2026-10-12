@@ -49,9 +49,10 @@ durable: add an entry only when it's worth a future session knowing.
   connectors in alphanumeric order by manifest path (code-point comparison, so
   `github-pat/…` sorts before `github/…`) — same enforcement.
 - The catalogue lists this repository only if its latest GitHub release has a
-  `<name>.wasm` for every entry in `connectors-manifest.json`. A new connector
-  is published by pushing a `v*` tag; `.github/workflows/release.yml` builds
-  every entry against the real SDK. So list only buildable components there.
+  `<name>.wasm` for every entry in `connectors-manifest.json`.
+  `.github/workflows/release.yml` builds every entry against the real SDK and
+  publishes a release automatically whenever a connector changes on main, so
+  list only buildable components there.
   A remote MCP server (a manifest with `remote`) has no wasm and must not be
   listed: `scripts/build-release.mjs` fails on one.
 - The connector `manifest.json` files have mixed formatting (some pretty-printed

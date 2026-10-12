@@ -15,9 +15,21 @@
 name: Release
 
 on:
-  # Push a tag to release: git tag v0.2.0 && git push origin v0.2.0
+  # A change to a connector on main releases every connector, under a tag made
+  # from the date and the commit. A tag pushed by hand releases too:
+  # git tag v0.2.0 && git push origin v0.2.0
   push:
+    branches: [main]
     tags: ['v*']
+    paths:
+      - '*/src/**'
+      - '*/Cargo.toml'
+      - '*/Cargo.lock'
+      - '*/manifest.json'
+      - 'connectors-manifest.json'
+      - 'scripts/build-release.mjs'
+      - 'scripts/manifest.mjs'
+      - '.github/workflows/release.yml'
   # Or release from the Actions tab; the tag is created at the selected commit.
   workflow_dispatch:
     inputs:
@@ -98,13 +110,23 @@ jobs:
           GH_TOKEN: ${{ github.token }}
           # From the environment, never interpolated into the script: the
           # dispatch input is free text.
-          TAG: ${{ github.event_name == 'push' && github.ref_name || inputs.tag }}
+          INPUT_TAG: ${{ inputs.tag }}
         run: |
-          gh release create "$TAG" dist/*.wasm \
+          case "$GITHUB_EVENT_NAME:$GITHUB_REF_TYPE" in
+            push:tag) tag="$GITHUB_REF_NAME" ;;
+            push:branch) tag="v$(date -u +%Y.%m.%d)-${GITHUB_SHA::7}" ;;
+            *) tag="$INPUT_TAG" ;;
+          esac
+          # Drafted first and published once every asset is up: the catalogue
+          # reads only the latest release, and one caught half-uploaded would
+          # exclude the repository until the next.
+          gh release create "$tag" dist/*.wasm \
             --repo "$GITHUB_REPOSITORY" \
             --target "$GITHUB_SHA" \
-            --title "$TAG" \
-            --generate-notes
+            --title "$tag" \
+            --generate-notes \
+            --draft
+          gh release edit "$tag" --repo "$GITHUB_REPOSITORY" --draft=false --latest
 
       # A release made with the Actions token starts no other workflow, so ask
       # for the catalogue rebuild here rather than leave it to tonight's run.
