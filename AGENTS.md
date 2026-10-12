@@ -23,8 +23,12 @@ durable: add an entry only when it's worth a future session knowing.
 - The public tool contract is frozen: tool names, input schemas, manifest.json
   contents, and observable behavior must not change in a refactor. Fix genuine
   bugs explicitly and call them out in the PR description.
-- 100% line and function coverage is mandatory for every connector
-  (`cargo llvm-cov --fail-under-lines 100 --fail-under-functions 100`);
+- 100% line and function coverage is mandatory for every connector, and 100%
+  region coverage after exclusions (`node scripts/check-coverage.mjs` from the
+  connector directory; wired as the CI coverage gate). A region that cannot be
+  covered gets a `// coverage: exclude — <reason>` note on its line — the
+  reason is mandatory, and the linter rejects notes gone stale. Prefer a test
+  over a note; the note is for the genuinely uncoverable.
   `cargo fmt --all -- --check` must be clean.
 - Every published connector's `manifest.json` must carry a non-empty `icons`
   array and a non-empty `instructions` string (guidance for the model using

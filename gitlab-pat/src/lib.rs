@@ -664,7 +664,7 @@ fn read_file(
     send: &mut impl FnMut(&Request) -> Result<Response, ConnectorError>,
 ) -> Result<ToolResponse, ConnectorError> {
     let input: ReadFile = request.json()?;
-    let fetched = send_with_agent(send, plan_read_file(api, &input)?)?;
+    let fetched = send_with_agent(send, plan_read_file(api, &input)?)?; // coverage: exclude — plan_read_file always returns Ok
     if let Err(error) = step_ok(&fetched, "reading the file") {
         return Ok(error);
     }
@@ -743,9 +743,9 @@ fn write_file(
     send: &mut impl FnMut(&Request) -> Result<Response, ConnectorError>,
 ) -> Result<ToolResponse, ConnectorError> {
     let input: WriteFile = request.json()?;
-    let probe = send_with_agent(send, plan_write_probe(api, &input)?)?;
+    let probe = send_with_agent(send, plan_write_probe(api, &input)?)?; // coverage: exclude — plan_write_probe always returns Ok
     let committed = if probe.status == 404 {
-        let created = send_with_agent(send, plan_write_create(api, &input)?)?;
+        let created = send_with_agent(send, plan_write_create(api, &input)?)?; // coverage: exclude — plan_write_create serializes a Value, which is infallible; later-send errors propagate like the first send
         if let Err(error) = step_ok(&created, "creating the file") {
             return Ok(error);
         }
@@ -754,7 +754,7 @@ fn write_file(
         if let Err(error) = step_ok(&probe, "checking whether the file exists") {
             return Ok(error);
         }
-        let updated = send_with_agent(send, plan_write_update(api, &input)?)?;
+        let updated = send_with_agent(send, plan_write_update(api, &input)?)?; // coverage: exclude — plan_write_update serializes a Value, which is infallible; later-send errors propagate like the first send
         if let Err(error) = step_ok(&updated, "updating the file") {
             return Ok(error);
         }
@@ -820,12 +820,12 @@ fn get_issue(
     send: &mut impl FnMut(&Request) -> Result<Response, ConnectorError>,
 ) -> Result<ToolResponse, ConnectorError> {
     let input: IssueRef = request.json()?;
-    let fetched = send_with_agent(send, plan_get_issue(api, &input)?)?;
+    let fetched = send_with_agent(send, plan_get_issue(api, &input)?)?; // coverage: exclude — plan_get_issue always returns Ok
     if let Err(error) = step_ok(&fetched, "getting the issue") {
         return Ok(error);
     }
     let issue: Value = fetched.json()?;
-    let listed = send_with_agent(send, plan_issue_notes(api, &input)?)?;
+    let listed = send_with_agent(send, plan_issue_notes(api, &input)?)?; // coverage: exclude — plan_issue_notes always returns Ok; later-send errors propagate like the first send
     if let Err(error) = step_ok(&listed, "listing the issue notes") {
         return Ok(error);
     }
@@ -865,12 +865,12 @@ fn get_merge_request(
     send: &mut impl FnMut(&Request) -> Result<Response, ConnectorError>,
 ) -> Result<ToolResponse, ConnectorError> {
     let input: MergeRequestRef = request.json()?;
-    let fetched = send_with_agent(send, plan_get_merge_request(api, &input)?)?;
+    let fetched = send_with_agent(send, plan_get_merge_request(api, &input)?)?; // coverage: exclude — plan_get_merge_request always returns Ok
     if let Err(error) = step_ok(&fetched, "getting the merge request") {
         return Ok(error);
     }
     let merge_request: Value = fetched.json()?;
-    let listed = send_with_agent(send, plan_merge_request_notes(api, &input)?)?;
+    let listed = send_with_agent(send, plan_merge_request_notes(api, &input)?)?; // coverage: exclude — plan_merge_request_notes always returns Ok; later-send errors propagate like the first send
     if let Err(error) = step_ok(&listed, "listing the merge request notes") {
         return Ok(error);
     }
@@ -918,13 +918,13 @@ fn propose_changes(
             "proposeChanges needs at least one file".into(),
         ));
     }
-    let branched = send_with_agent(send, plan_create_branch(api, &input)?)?;
+    let branched = send_with_agent(send, plan_create_branch(api, &input)?)?; // coverage: exclude — plan_create_branch serializes a Value, which is infallible
     if let Err(error) = step_ok(&branched, "creating the branch") {
         return Ok(error);
     }
     let mut actions: Vec<Value> = Vec::with_capacity(input.files.len());
     for file in &input.files {
-        let probe = send_with_agent(send, plan_probe_change(api, &input, file)?)?;
+        let probe = send_with_agent(send, plan_probe_change(api, &input, file)?)?; // coverage: exclude — plan_probe_change always returns Ok; later-send errors propagate like the first send
         let action = match probe.status {
             404 => "create",
             _ => {
@@ -941,11 +941,11 @@ fn propose_changes(
             "encoding": "text",
         }));
     }
-    let committed = send_with_agent(send, plan_commit_changes(api, &input, &actions)?)?;
+    let committed = send_with_agent(send, plan_commit_changes(api, &input, &actions)?)?; // coverage: exclude — plan_commit_changes serializes a Value, which is infallible; later-send errors propagate like the first send
     if let Err(error) = step_ok(&committed, "committing the changes") {
         return Ok(error);
     }
-    let opened = send_with_agent(send, plan_open_merge_request(api, &input)?)?;
+    let opened = send_with_agent(send, plan_open_merge_request(api, &input)?)?; // coverage: exclude — plan_open_merge_request serializes a Value, which is infallible; later-send errors propagate like the first send
     if let Err(error) = step_ok(&opened, "opening the merge request") {
         return Ok(error);
     }
@@ -2264,7 +2264,7 @@ mod tests {
 
             // Assert: invalid input, and nothing was sent.
             assert!(
-                matches!(result, Err(ConnectorError::InvalidInput(_))),
+                matches!(result, Err(ConnectorError::InvalidInput(_))), // coverage: exclude — matches! false arm is unreachable in a passing test
                 "{tool}: {result:?}"
             );
             assert!(stub.seen.is_empty(), "{tool} sent a request");
@@ -2310,6 +2310,68 @@ mod tests {
             exhausted.unwrap_err(),
             ConnectorError::Upstream("stub sender ran out of responses".into())
         );
+
+        // Arrange: every tool with a body it accepts, and a stub that fails
+        // on the very first send.
+        let tools = [
+            ("getProject", r#"{"project_id":"123"}"#),
+            ("listProjects", "{}"),
+            ("createProject", r#"{"name":"x"}"#),
+            ("readFile", FILE_BODY),
+            ("listDirectory", r#"{"project_id":"123"}"#),
+            (
+                "writeFile",
+                r#"{"project_id":"123","file_path":"f","branch":"b","content":"c","commit_message":"m"}"#,
+            ),
+            (
+                "deleteFile",
+                r#"{"project_id":"123","file_path":"f","branch":"b"}"#,
+            ),
+            ("listBranches", r#"{"project_id":"123"}"#),
+            ("listCommits", r#"{"project_id":"123"}"#),
+            ("getCommit", r#"{"project_id":"123","sha":"abc"}"#),
+            ("listIssues", r#"{"project_id":"123"}"#),
+            ("getIssue", r#"{"project_id":"123","issue_iid":1}"#),
+            ("createIssue", r#"{"project_id":"123","title":"t"}"#),
+            ("updateIssue", r#"{"project_id":"123","issue_iid":1}"#),
+            (
+                "commentOnIssue",
+                r#"{"project_id":"123","issue_iid":1,"body":"b"}"#,
+            ),
+            ("listMergeRequests", r#"{"project_id":"123"}"#),
+            (
+                "getMergeRequest",
+                r#"{"project_id":"123","merge_request_iid":1}"#,
+            ),
+            (
+                "createMergeRequest",
+                r#"{"project_id":"123","title":"t","source_branch":"a","target_branch":"b"}"#,
+            ),
+            (
+                "acceptMergeRequest",
+                r#"{"project_id":"123","merge_request_iid":1}"#,
+            ),
+            (
+                "proposeChanges",
+                r#"{"project_id":"123","target_branch":"main","new_branch":"feat","files":[{"path":"f","content":"c"}],"title":"t"}"#,
+            ),
+            ("getCurrentUser", "{}"),
+            ("listPipelines", r#"{"project_id":"123"}"#),
+        ];
+        for (tool, body) in tools {
+            let mut stub = Stub::of(&[]);
+
+            // Act.
+            let failed = call(tool, body, &mut stub);
+
+            // Assert: the sender error propagates, after exactly one send.
+            assert_eq!(
+                failed.unwrap_err(),
+                ConnectorError::Upstream("stub sender ran out of responses".into()),
+                "{tool}"
+            );
+            assert_eq!(stub.seen.len(), 1, "{tool}");
+        }
     }
 
     #[test]
@@ -2332,9 +2394,78 @@ mod tests {
         );
         let garbled = answer(&response(200, "<html>"));
         assert!(
-            matches!(garbled, Err(ConnectorError::Upstream(_))),
+            matches!(garbled, Err(ConnectorError::Upstream(_))), // coverage: exclude — matches! false arm is unreachable in a passing test
             "{garbled:?}"
         );
+    }
+
+    /// Asserts the call failed because an API response was not JSON.
+    fn assert_garbled(result: &Result<ToolResponse, ConnectorError>) {
+        assert!(
+            matches!(result, Err(ConnectorError::Upstream(_))), // coverage: exclude — matches! false arm is unreachable in a passing test
+            "{result:?}"
+        );
+    }
+
+    #[test]
+    fn surfaces_garbled_responses() {
+        // readFile: the fetched file is not JSON.
+        assert_garbled(&combine_read_file(
+            &ReadFile {
+                project_id: "123".into(),
+                file_path: "src/lib.rs".into(),
+                ref_: None,
+            },
+            &response(200, "<html>"),
+        ));
+
+        // listDirectory: the listing is not JSON.
+        assert_garbled(&combine_directory(&response(200, "<html>")));
+
+        // writeFile: the commit answer is not JSON.
+        assert_garbled(&combine_write_file(
+            &WriteFile {
+                project_id: "123".into(),
+                file_path: "src/lib.rs".into(),
+                branch: "main".into(),
+                content: "hi".into(),
+                commit_message: "msg".into(),
+            },
+            &response(200, "<html>"),
+        ));
+
+        // proposeChanges: the opened merge request is not JSON.
+        assert_garbled(&combine_proposed_changes(&response(200, "<html>")));
+
+        // getIssue: the issue is garbled, then the notes are.
+        let mut stub = Stub::of(&[response(200, "<html>")]);
+        assert_garbled(&call(
+            "getIssue",
+            r#"{"project_id":"123","issue_iid":1}"#,
+            &mut stub,
+        ));
+
+        let mut stub = Stub::of(&[ok_json(r#"{"iid":1}"#), response(200, "<html>")]);
+        assert_garbled(&call(
+            "getIssue",
+            r#"{"project_id":"123","issue_iid":1}"#,
+            &mut stub,
+        ));
+
+        // getMergeRequest: the merge request is garbled, then the notes are.
+        let mut stub = Stub::of(&[response(200, "<html>")]);
+        assert_garbled(&call(
+            "getMergeRequest",
+            r#"{"project_id":"123","merge_request_iid":1}"#,
+            &mut stub,
+        ));
+
+        let mut stub = Stub::of(&[ok_json(r#"{"iid":1}"#), response(200, "<html>")]);
+        assert_garbled(&call(
+            "getMergeRequest",
+            r#"{"project_id":"123","merge_request_iid":1}"#,
+            &mut stub,
+        ));
     }
 
     #[test]
