@@ -26,6 +26,7 @@ import { fileURLToPath } from 'node:url'
 
 import {
   CATALOG_TOPIC,
+  EXCLUDED_FILE,
   INDEX_FILE,
   MANIFEST_FILE,
   REMOTE_FILE,
@@ -39,6 +40,7 @@ import {
   completeness,
   createFetchers,
   describeFailure,
+  excludedFile,
   flagNameConflicts,
   freshness,
   isUnchanged,
@@ -659,13 +661,14 @@ test('buildIndex publishes what the server reads, and what it ignores', async ()
     releases: { 'acme/gmail': releaseFor(['gmail']), 'acme/drive': releaseFor(['drive']) },
   })
 
-  const index = await buildIndex({ ...github, now: () => NOW, concurrency: 1 })
+  const { index, excluded } = await buildIndex({ ...github, now: () => NOW, concurrency: 1 })
   assert.equal(index.schemaVersion, SCHEMA_VERSION)
   assert.equal(index.generatedAt, '2026-10-10T00:00:00.000Z')
   assert.deepEqual(index.topics, TOPICS)
   assert.deepEqual(index.counts, { found: 2, listed: 2, excluded: 0, warned: 0 })
   assert.deepEqual(index.repositories.map((r) => r.full_name), ['acme/drive', 'acme/gmail'])
-  assert.deepEqual(index.excluded, [])
+  assert.equal(index.excluded, EXCLUDED_FILE, 'the catalogue points at the companion file, it does not carry the rows')
+  assert.deepEqual(excluded, [])
   assert.match(index.$comment, /do not edit/)
 })
 
@@ -673,13 +676,14 @@ test('buildIndex lists an excluded repository with the reason, outside the catal
   const github = fakeGitHub({
     itemsFor: (query) => (query.startsWith(`topic:${CATALOG_TOPIC}`) ? [item({ license: { spdx_id: 'GPL-3.0' } })] : []),
   })
-  const index = await buildIndex({ ...github, now: () => NOW })
+  const { index, excluded } = await buildIndex({ ...github, now: () => NOW })
 
   assert.deepEqual(index.repositories, [], 'the server must not offer a row it cannot install')
+  assert.equal(index.excluded, EXCLUDED_FILE)
   assert.equal(index.counts.excluded, 1)
-  assert.deepEqual(index.excluded[0].full_name, 'acme/gmail')
-  assert.equal(index.excluded[0].license, 'GPL-3.0')
-  assert.match(index.excluded[0].reason, /Licensed as "GPL-3.0"/)
+  assert.deepEqual(excluded[0].full_name, 'acme/gmail')
+  assert.equal(excluded[0].license, 'GPL-3.0')
+  assert.match(excluded[0].reason, /Licensed as "GPL-3.0"/)
 })
 
 test('buildIndex counts the rows carrying a warning', async () => {
@@ -688,7 +692,7 @@ test('buildIndex counts the rows carrying a warning', async () => {
     files: { [fileAt('acme/gmail', MANIFEST_FILE)]: manifestFor('gmail') },
     releases: { 'acme/gmail': releaseFor(['gmail']) },
   })
-  const index = await buildIndex({ ...github, now: () => NOW })
+  const { index } = await buildIndex({ ...github, now: () => NOW })
 
   assert.equal(index.counts.listed, 1)
   assert.equal(index.counts.warned, 1)
@@ -701,7 +705,7 @@ test('buildIndex works through a long list in bounded batches', async () => {
   let inFlight = 0
   let peak = 0
 
-  const index = await buildIndex({
+  const { index } = await buildIndex({
     fetchJson: github.fetchJson,
     fetchText: async (url) => {
       inFlight += 1
@@ -723,7 +727,7 @@ test('buildIndex carries truncation through to the published file', async () => 
   for (const bucket of STAR_BUCKETS) totals[buildQuery(CATALOG_TOPIC, bucket)] ??= 0
   const github = fakeGitHub({ totals, itemsFor: () => [] })
 
-  assert.equal((await buildIndex({ ...github, now: () => NOW })).truncated, true)
+  assert.equal((await buildIndex({ ...github, now: () => NOW })).index.truncated, true)
 })
 
 test('isUnchanged ignores the timestamp, and nothing else', () => {
@@ -788,41 +792,64 @@ test('main writes the catalogue and reports the change', async () => {
   const outputs = []
   const logs = []
 
-  const { changed, index } = await main({
+  const { changed, index, excluded } = await main({
     fetchers: { ...github, now: () => NOW },
     readPrevious: async () => {
       throw new Error('ENOENT')
     },
+    readPreviousExcluded: async () => {
+      throw new Error('ENOENT')
+    },
     write: async (contents) => written.push(contents),
+    writeExcluded: async (contents) => written.push(contents),
     setOutput: async (value) => outputs.push(value),
     log: (line) => logs.push(line),
   })
 
   assert.equal(changed, true)
-  assert.equal(JSON.parse(written[0]).counts.excluded, 1)
+  assert.equal(written.length, 2, 'the catalogue and its companion are written together')
+  const catalogue = JSON.parse(written[0])
+  const companion = JSON.parse(written[1])
+  assert.equal(catalogue.counts.excluded, 1)
+  assert.equal(catalogue.excluded, EXCLUDED_FILE)
+  assert.equal(companion.excluded.length, 1)
+  assert.equal(companion.generatedAt, catalogue.generatedAt, 'the two files are one build')
   assert.deepEqual(outputs, [true])
   assert.match(logs[0], /0 listed \(0 with warnings\), 1 excluded/)
   assert.equal(index.counts.found, 1)
+  assert.equal(excluded.length, 1)
 })
 
 test('main leaves the file alone when nothing moved', async () => {
   const github = fakeGitHub({ itemsFor: (query) => (query.startsWith(`topic:${CATALOG_TOPIC}`) ? [item()] : []) })
   const fetchers = { ...github, now: () => NOW }
-  const first = await main({ fetchers, readPrevious: async () => '', write: async () => {}, setOutput: async () => {}, log: () => {} })
+  const first = await main({
+    fetchers,
+    readPrevious: async () => '',
+    readPreviousExcluded: async () => '',
+    write: async () => {},
+    writeExcluded: async () => {},
+    setOutput: async () => {},
+    log: () => {},
+  })
 
   const written = []
+  const writtenExcluded = []
   const logs = []
   const { changed } = await main({
     fetchers,
     // A day later: the same catalogue, a new timestamp, and nothing to commit.
     readPrevious: async () => serialize({ ...first.index, generatedAt: '2026-10-09T00:00:00.000Z' }),
+    readPreviousExcluded: async () => serialize(excludedFile(first.excluded, '2026-10-09T00:00:00.000Z')),
     write: async (contents) => written.push(contents),
+    writeExcluded: async (contents) => writtenExcluded.push(contents),
     setOutput: async () => {},
     log: (line) => logs.push(line),
   })
 
   assert.equal(changed, false)
   assert.deepEqual(written, [], 'a rewritten file would be a commit saying nothing happened')
+  assert.deepEqual(writtenExcluded, [], 'same for the companion file')
   assert.match(logs[0], /No change/)
 })
 
@@ -835,7 +862,9 @@ test('main says so out loud when the catalogue is incomplete', async () => {
   await main({
     fetchers: { ...github, now: () => NOW },
     readPrevious: async () => '',
+    readPreviousExcluded: async () => '',
     write: async () => {},
+    writeExcluded: async () => {},
     setOutput: async () => {},
     log: (line) => logs.push(line),
   })
@@ -847,7 +876,14 @@ test('main hands the result to the Actions step that decides whether to commit',
   const outputPath = join(await mkdtemp(join(tmpdir(), 'connectors-')), 'github-output')
   process.env.GITHUB_OUTPUT = outputPath
   try {
-    await main({ fetchers: { ...github, now: () => NOW }, readPrevious: async () => '', write: async () => {}, log: () => {} })
+    await main({
+      fetchers: { ...github, now: () => NOW },
+      readPrevious: async () => '',
+      readPreviousExcluded: async () => '',
+      write: async () => {},
+      writeExcluded: async () => {},
+      log: () => {},
+    })
     assert.equal(await readFile(outputPath, 'utf8'), 'changed=true\n')
   } finally {
     delete process.env.GITHUB_OUTPUT
@@ -860,7 +896,9 @@ test('main writes nothing to an Actions output when it is not running in one', a
   const { changed } = await main({
     fetchers: { ...github, now: () => NOW },
     readPrevious: async () => '',
+    readPreviousExcluded: async () => '',
     write: async () => {},
+    writeExcluded: async () => {},
     log: () => {},
   })
   assert.equal(changed, true)
@@ -889,6 +927,10 @@ test('run as a program, it writes connectors.json into the working directory', a
   const index = JSON.parse(await readFile(join(cwd, 'connectors.json'), 'utf8'))
   assert.deepEqual(index.topics, TOPICS)
   assert.deepEqual(index.repositories, [])
+  assert.equal(index.excluded, EXCLUDED_FILE)
+  const companion = JSON.parse(await readFile(join(cwd, 'excluded-connectors.json'), 'utf8'))
+  assert.deepEqual(companion.excluded, [])
+  assert.equal(companion.generatedAt, index.generatedAt, 'the two files are one build')
 })
 
 test('run as a program, it fails loudly when GitHub cannot be reached', async () => {

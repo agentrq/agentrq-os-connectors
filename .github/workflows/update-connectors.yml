@@ -76,7 +76,7 @@ jobs:
             gh pr close "$stale"
           done
           git checkout -b "$branch"
-          git add connectors.json
+          git add connectors.json excluded-connectors.json
           git commit -m 'chore: update the connector catalogue'
           # The schedule is daily and the job is cancelled by a newer run, so a
           # push that lost a race is a stale result, not one worth retrying.
@@ -84,7 +84,15 @@ jobs:
           gh pr create --title 'chore: update the connector catalogue' \
             --body 'Automated rebuild of the public connector catalogue.' \
             --head "$branch" --base main
-          gh pr merge --merge --delete-branch "$branch"
+          # Merge only once CI is green on the PR, so main never takes a red
+          # catalogue. Waiting also keeps the branch alive while CI runs, so
+          # checkout works and the runs complete instead of failing.
+          if gh pr checks "$branch" --watch --interval 30; then
+            gh pr merge --merge --delete-branch "$branch"
+          else
+            echo 'Catalogue PR checks failed; leaving the PR open.'
+            exit 1
+          fi
 
       - name: Report
         run: |
