@@ -80,6 +80,10 @@
             "description": "Sort order: \"startTime\" (requires singleEvents) or \"updated\"",
             "type": "string"
           },
+          "pageToken": {
+            "description": "Page token from a previous listEvents response (nextPageToken)",
+            "type": "string"
+          },
           "q": {
             "description": "Free-text search across summary, description, location and attendees",
             "type": "string"
