@@ -301,12 +301,14 @@ workflow** in the Actions tab release too.
 The workflow builds each connector for `wasm32-wasip2` against the **real**
 `connectors-sdk` from `agentrq/connectors`, publishes the components as the
 release, and starts a catalogue rebuild. The `sdk/connectors-sdk` in this
-repository is a test double, and its `export_connector!` exports nothing. Since
-`agentrq/connectors` is private, the workflow needs a `CONNECTORS_SDK_TOKEN`
-secret that can read its contents. To build locally:
+repository is a test double, and its `export_connector!` exports nothing. While
+`agentrq/connectors` is private, the workflow can't read it without a
+`CONNECTORS_SDK_TOKEN` secret, so for now releases are built locally and uploaded
+by hand:
 
 ```sh
 node scripts/build-release.mjs --sdk ../connectors/sdk/connectors-sdk --out dist
+gh release create v0.2.0 dist/*.wasm --target main --generate-notes
 ```
 
 Only components belong in `connectors-manifest.json`. A remote MCP server has

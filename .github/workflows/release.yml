@@ -8,10 +8,11 @@
 # server installs exactly that asset. Without a release the repository is
 # excluded with "No published release, so there is no component to install."
 #
-# The components are built against the real connectors-sdk from the private
+# The components are built against the real connectors-sdk from the
 # agentrq/connectors repository: the sdk/connectors-sdk here is a test double
-# whose export_connector! exports nothing. Reading that repository needs the
-# CONNECTORS_SDK_TOKEN secret, a token with read access to its contents.
+# whose export_connector! exports nothing. While that repository is private,
+# reading it needs a CONNECTORS_SDK_TOKEN secret with read access to its
+# contents; once it is public, the workflow's own token is enough.
 name: Release
 
 on:
@@ -69,7 +70,7 @@ jobs:
         uses: actions/checkout@v4
         with:
           repository: agentrq/connectors
-          token: ${{ secrets.CONNECTORS_SDK_TOKEN }}
+          token: ${{ secrets.CONNECTORS_SDK_TOKEN || github.token }}
           path: _connectors
 
       # The toolchain agentrq/connectors pins, with the target the server runs.
