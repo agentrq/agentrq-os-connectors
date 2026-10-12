@@ -48,6 +48,13 @@ durable: add an entry only when it's worth a future session knowing.
   linter, and the nightly build. `connectors-manifest.json` must list
   connectors in alphanumeric order by manifest path (code-point comparison, so
   `github-pat/…` sorts before `github/…`) — same enforcement.
+- The catalogue lists this repository only if its latest GitHub release has a
+  `<name>.wasm` for every entry in `connectors-manifest.json`.
+  `.github/workflows/release.yml` builds every entry against the real SDK and
+  publishes a release automatically whenever a connector changes on main, so
+  list only buildable components there.
+  A remote MCP server (a manifest with `remote`) has no wasm and must not be
+  listed: `scripts/build-release.mjs` fails on one.
 - The connector `manifest.json` files have mixed formatting (some pretty-printed
   2-space, some compact single-line). When editing one, preserve its existing
   format — insert keys as text rather than re-serializing the whole file.

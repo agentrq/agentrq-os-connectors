@@ -1,0 +1,137 @@
+# Copyright 2026 Contextual, Inc. https://agentrq.com
+# This notice may not be modified or removed.
+
+# Builds every connector as a wasm component and publishes them as a release.
+#
+# The catalogue lists this repository only when its latest release carries a
+# `<connector name>.wasm` for each connector in connectors-manifest.json, and a
+# server installs exactly that asset. Without a release the repository is
+# excluded with "No published release, so there is no component to install."
+#
+# The components are built against the real connectors-sdk from the
+# agentrq/connectors repository: the sdk/connectors-sdk here is a test double
+# whose export_connector! exports nothing. While that repository is private,
+# reading it needs a CONNECTORS_SDK_TOKEN secret with read access to its
+# contents; once it is public, the workflow's own token is enough.
+name: Release
+
+on:
+  # A change to a connector on main releases every connector, under a tag made
+  # from the date and the commit. A tag pushed by hand releases too:
+  # git tag v0.2.0 && git push origin v0.2.0
+  push:
+    branches: [main]
+    tags: ['v*']
+    paths:
+      - '*/src/**'
+      - '*/Cargo.toml'
+      - '*/Cargo.lock'
+      - '*/manifest.json'
+      - 'connectors-manifest.json'
+      - 'scripts/build-release.mjs'
+      - 'scripts/manifest.mjs'
+      - '.github/workflows/release.yml'
+  # Or release from the Actions tab; the tag is created at the selected commit.
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: 'Tag to release, e.g. v0.2.0'
+        required: true
+  # A pull request that changes a connector builds it against the real SDK too,
+  # so one that only compiles against the test double is caught before release.
+  pull_request:
+    paths:
+      - '*/src/**'
+      - '*/Cargo.toml'
+      - '*/Cargo.lock'
+      - '*/manifest.json'
+      - 'connectors-manifest.json'
+      - 'scripts/build-release.mjs'
+      - 'scripts/manifest.mjs'
+      - '.github/workflows/release.yml'
+
+permissions:
+  contents: read
+
+concurrency:
+  group: release-${{ github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+jobs:
+  build:
+    # A pull request from a fork gets no secrets, so it cannot read the real SDK.
+    if: github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Check out the real connectors-sdk
+        uses: actions/checkout@v4
+        with:
+          repository: agentrq/connectors
+          token: ${{ secrets.CONNECTORS_SDK_TOKEN || github.token }}
+          path: _connectors
+
+      # The toolchain agentrq/connectors pins, with the target the server runs.
+      - uses: dtolnay/rust-toolchain@master
+        with:
+          toolchain: '1.99'
+          targets: wasm32-wasip2
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+
+      - name: Build the components
+        run: node scripts/build-release.mjs --sdk _connectors/sdk/connectors-sdk --out dist
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: components
+          path: dist/*.wasm
+          if-no-files-found: error
+
+  publish:
+    needs: build
+    if: github.event_name != 'pull_request'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+      # To start the catalogue rebuild below.
+      actions: write
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          name: components
+          path: dist
+
+      - name: Publish the release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          # From the environment, never interpolated into the script: the
+          # dispatch input is free text.
+          INPUT_TAG: ${{ inputs.tag }}
+        run: |
+          case "$GITHUB_EVENT_NAME:$GITHUB_REF_TYPE" in
+            push:tag) tag="$GITHUB_REF_NAME" ;;
+            push:branch) tag="v$(date -u +%Y.%m.%d)-${GITHUB_SHA::7}" ;;
+            *) tag="$INPUT_TAG" ;;
+          esac
+          # Drafted first and published once every asset is up: the catalogue
+          # reads only the latest release, and one caught half-uploaded would
+          # exclude the repository until the next.
+          gh release create "$tag" dist/*.wasm \
+            --repo "$GITHUB_REPOSITORY" \
+            --target "$GITHUB_SHA" \
+            --title "$tag" \
+            --generate-notes \
+            --draft
+          gh release edit "$tag" --repo "$GITHUB_REPOSITORY" --draft=false --latest
+
+      # A release made with the Actions token starts no other workflow, so ask
+      # for the catalogue rebuild here rather than leave it to tonight's run.
+      - name: Refresh the catalogue
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: gh workflow run update-connectors.yml --repo "$GITHUB_REPOSITORY" --ref main
