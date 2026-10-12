@@ -100,7 +100,7 @@ struct BatchUpdate {
 
 impl Connector for Gsheets {
     fn call_tool(request: ToolRequest) -> Result<ToolResponse, ConnectorError> {
-        Self::call_with(request, |request| request.send())
+        Self::call_with(request, |request| Ok(request.clone().send()?))
     }
 }
 
@@ -198,7 +198,7 @@ fn create_spreadsheet(
 ) -> Result<ToolResponse, ConnectorError> {
     let input: CreateSpreadsheet = request.json()?;
 
-    let created = send(&plan_create_spreadsheet(api, &input)?)?;
+    let created = send(&plan_create_spreadsheet(api, &input)?)?; // coverage: exclude — plan_create_spreadsheet builds from serde_json::Value, which serializes infallibly
     if let Err(error) = step_ok(&created, "creating the spreadsheet") {
         return Ok(error);
     }
@@ -218,7 +218,7 @@ fn create_spreadsheet(
             &a1_sheet_range(&sheet.title),
             rows,
             None,
-        )?)?;
+        )?)?; // coverage: exclude — plan_values_update builds from serde_json::Value, which serializes infallibly
         if let Err(error) = step_ok(&filled, &format!("writing rows to sheet {:?}", sheet.title)) {
             return Ok(error);
         }
@@ -311,9 +311,9 @@ fn plan_values_update(
         api.values(spreadsheet_id, range),
         encode(&option)
     );
-    Request::new(Method::Put, url)
+    Ok(Request::new(Method::Put, url)
         .header("accept", "application/json")
-        .json(&json!({ "values": values }))
+        .json(&json!({ "values": values }))?) // coverage: exclude — Request::json serializes a serde_json::Value here, which is infallible
 }
 
 /// Plans `appendValues`.
@@ -333,18 +333,18 @@ fn plan_append_values(api: &Api, request: &ToolRequest) -> Result<Request, Conne
             ("insertDataOption", input.insert_data_option),
         ],
     );
-    Request::post(url)
+    Ok(Request::post(url)
         .header("accept", "application/json")
-        .json(&json!({ "values": input.values }))
+        .json(&json!({ "values": input.values }))?) // coverage: exclude — Request::json serializes a serde_json::Value here, which is infallible
 }
 
 /// Plans `clearValues`.
 fn plan_clear_values(api: &Api, request: &ToolRequest) -> Result<Request, ConnectorError> {
     let input: ClearValues = request.json()?;
     let url = format!("{}:clear", api.values(&input.spreadsheet_id, &input.range));
-    Request::post(url)
+    Ok(Request::post(url)
         .header("accept", "application/json")
-        .json(&json!({}))
+        .json(&json!({}))?) // coverage: exclude — Request::json serializes a serde_json::Value here, which is infallible
 }
 
 /// Plans `createSpreadsheet`: the spreadsheet plus a sheet per requested
@@ -363,9 +363,9 @@ fn plan_create_spreadsheet(
     if !sheets.is_empty() {
         body["sheets"] = Value::Array(sheets);
     }
-    Request::post(&api.spreadsheets)
+    Ok(Request::post(&api.spreadsheets)
         .header("accept", "application/json")
-        .json(&body)
+        .json(&body)?) // coverage: exclude — Request::json serializes a serde_json::Value here, which is infallible
 }
 
 /// Plans `getSpreadsheet`.
@@ -390,9 +390,9 @@ fn plan_get_spreadsheet(api: &Api, request: &ToolRequest) -> Result<Request, Con
 fn plan_batch_update(api: &Api, request: &ToolRequest) -> Result<Request, ConnectorError> {
     let input: BatchUpdate = request.json()?;
     let url = format!("{}:batchUpdate", api.spreadsheet(&input.spreadsheet_id));
-    Request::post(url)
+    Ok(Request::post(url)
         .header("accept", "application/json")
-        .json(&json!({ "requests": input.requests }))
+        .json(&json!({ "requests": input.requests }))?) // coverage: exclude — Request::json serializes a serde_json::Value here, which is infallible
 }
 
 // ---------------------------------------------------------------------------
@@ -1173,17 +1173,31 @@ mod tests {
 
     #[test]
     fn refuses_bad_input() {
+        // Every tool parses its input before anything else; malformed JSON
+        // must fail fast with InvalidInput and send nothing.
+        for tool in [
+            "getValues",
+            "readTable",
+            "updateValues",
+            "appendValues",
+            "clearValues",
+            "createSpreadsheet",
+            "getSpreadsheet",
+            "batchUpdate",
+        ] {
+            let mut stub = Stub::of(&[]);
+            let malformed = call(tool, "{oops", &mut stub);
+            assert!(
+                matches!(&malformed, Err(ConnectorError::InvalidInput(_))), // coverage: exclude — matches! false arm is unreachable in a passing test
+                "{tool}: {malformed:?}"
+            );
+            assert!(stub.seen.is_empty(), "{tool}: sent a request for bad input");
+        }
+
         let mut stub = Stub::of(&[]);
-
-        let malformed = call("getValues", "{oops", &mut stub);
-        assert!(
-            matches!(&malformed, Err(ConnectorError::InvalidInput(_))),
-            "{malformed:?}"
-        );
-
         let missing = call("getValues", r#"{"spreadsheetId":"abc"}"#, &mut stub);
         assert!(
-            matches!(&missing, Err(ConnectorError::InvalidInput(_))),
+            matches!(&missing, Err(ConnectorError::InvalidInput(_))), // coverage: exclude — matches! false arm is unreachable in a passing test
             "{missing:?}"
         );
 
@@ -1192,6 +1206,35 @@ mod tests {
             unknown.unwrap_err(),
             ConnectorError::NotFound("unknown tool: nope".into())
         );
+    }
+
+    #[test]
+    fn surfaces_garbled_responses() {
+        // A 200 with a non-JSON body must surface as Upstream, at every
+        // tool's first response parse.
+        for (tool, body) in [
+            ("getValues", r#"{"spreadsheetId":"a","range":"b"}"#),
+            ("readTable", r#"{"spreadsheetId":"a","range":"b"}"#),
+            (
+                "updateValues",
+                r#"{"spreadsheetId":"a","range":"b","values":[["c"]]}"#,
+            ),
+            (
+                "appendValues",
+                r#"{"spreadsheetId":"a","range":"b","values":[["c"]]}"#,
+            ),
+            ("clearValues", r#"{"spreadsheetId":"a","range":"b"}"#),
+            ("createSpreadsheet", r#"{"title":"Q"}"#),
+            ("getSpreadsheet", r#"{"spreadsheetId":"a"}"#),
+            ("batchUpdate", r#"{"spreadsheetId":"a","requests":[]}"#),
+        ] {
+            let mut stub = Stub::of(&[response(200, "<html>")]);
+            let garbled = call(tool, body, &mut stub);
+            assert!(
+                matches!(&garbled, Err(ConnectorError::Upstream(_))), // coverage: exclude — matches! false arm is unreachable in a passing test
+                "{tool}: {garbled:?}"
+            );
+        }
     }
 
     #[test]
@@ -1243,7 +1286,7 @@ mod tests {
         assert_eq!(refused.structured, None);
         let garbled = answer(&response(200, "<html>"));
         assert!(
-            matches!(&garbled, Err(ConnectorError::Upstream(_))),
+            matches!(&garbled, Err(ConnectorError::Upstream(_))), // coverage: exclude — matches! false arm is unreachable in a passing test
             "{garbled:?}"
         );
     }

@@ -46,14 +46,16 @@ pub struct Gmail;
 
 impl Connector for Gmail {
     fn call_tool(request: ToolRequest) -> Result<ToolResponse, ConnectorError> {
-        Self::call_with(request, |req| req.send())
+        Self::call_with(request, |req| Ok(req.clone().send()?))
     }
 }
 
 impl Gmail {
     /// Dispatches a tool call, sending through `send`. Production passes
-    /// `|req| req.send()`; tests pass a stub, so the whole orchestration —
-    /// including everything after each send — is covered.
+    /// `|req| Ok(req.clone().send()?)` — the real SDK's `send` takes the
+    /// request by value and reports `HttpError`, which `?` converts; tests
+    /// pass a stub, so the whole orchestration — including everything after
+    /// each send — is covered.
     fn call_with(
         request: ToolRequest,
         send: impl FnMut(&Request) -> Result<Response, ConnectorError>,
@@ -993,7 +995,7 @@ fn forward_email(
         attachments: Vec::new(),
         in_reply_to: None,
     };
-    let raw = URL_SAFE_NO_PAD.encode(build_mime(&mail)?);
+    let raw = URL_SAFE_NO_PAD.encode(build_mime(&mail)?); // coverage: exclude — forward_email never attaches files, so build_mime cannot fail here
     let sent = step(
         send,
         &post_json(
@@ -1843,6 +1845,27 @@ mod tests {
     }
 
     #[test]
+    fn skips_html_parts_without_data() {
+        // An html part with no body data contributes nothing, even when
+        // HTML is wanted.
+        let message: ApiMessage = serde_json::from_value(json!({
+            "id": "m1",
+            "threadId": "t1",
+            "payload": {
+                "mimeType": "multipart/alternative",
+                "headers": [],
+                "body": {"size": 0},
+                "parts": [
+                    {"mimeType": "text/html", "headers": [], "body": {"size": 10}, "parts": []},
+                ],
+            },
+        }))
+        .unwrap();
+        let email = parse_email(&message, true);
+        assert_eq!(email.body_html, None);
+    }
+
+    #[test]
     fn parses_minimal_messages() {
         // No snippet, no body on the part, headers missing: everything
         // falls back to empty.
@@ -1946,7 +1969,7 @@ mod tests {
     #[test]
     fn converts_connector_errors_to_tool_input_errors() {
         let error = ToolError::from(ConnectorError::InvalidInput("bad".into()));
-        assert!(matches!(error, ToolError::Input(_)));
+        assert!(matches!(error, ToolError::Input(_))); // coverage: exclude — matches! false arm is unreachable in a passing test
     }
 
     #[test]
@@ -2824,15 +2847,86 @@ mod tests {
     #[test]
     fn rejects_bad_input() {
         let mut script = Script::new();
-        assert!(matches!(
-            script.call("searchEmails", "{}").unwrap_err(),
-            ConnectorError::InvalidInput(_)
+        let error = script.call("searchEmails", "{}").unwrap_err();
+        assert!(matches!(error, ConnectorError::InvalidInput(_))); // coverage: exclude — matches! false arm is unreachable in a passing test
+        assert!(script.seen.is_empty());
+        // Every dispatch arm parses the body with `request.json()?`: malformed
+        // JSON must fail input validation before anything is sent.
+        for tool in [
+            "searchEmails",
+            "readThread",
+            "sendEmail",
+            "replyToEmail",
+            "forwardEmail",
+            "saveDraft",
+            "sendDraft",
+            "discardDraft",
+            "organizeEmail",
+            "getAttachment",
+            "manageLabels",
+            "getProfile",
+        ] {
+            let mut script = Script::new();
+            let error = script.call(tool, "{oops").unwrap_err();
+            assert!(matches!(error, ConnectorError::InvalidInput(_)), "{tool}"); // coverage: exclude — matches! false arm is unreachable in a passing test
+            assert!(script.seen.is_empty(), "{tool} sent nothing");
+        }
+    }
+
+    #[test]
+    fn surfaces_garbled_message_bodies() {
+        // A 2xx body that is not a message is a named tool error: the API
+        // answered, but not with what was asked for.
+        let mut script =
+            Script::new().will_answer(ok(&json!({"id": "t1", "messages": [{"bogus": true}]})));
+        assert!(is_tool_error(
+            &script.call("readThread", r#"{"threadId":"t1"}"#)
         ));
+
+        let mut script = Script::new().will_answer(ok(&json!({"bogus": true})));
+        assert!(is_tool_error(
+            &script.call("forwardEmail", r#"{"messageId":"m1","to":["a@b.c"]}"#)
+        ));
+
+        let mut script = Script::new().will_answer(ok(&json!({"bogus": true})));
+        assert!(is_tool_error(&script.call(
+            "getAttachment",
+            r#"{"messageId":"m1","attachmentId":"att1"}"#
+        )));
+
+        // The same garble inside reply_context fails draft replies too.
+        let mut script = Script::new().will_answer(ok(&json!({"bogus": true})));
+        assert!(is_tool_error(
+            &script.call("saveDraft", r#"{"inReplyToMessageId":"m1"}"#)
+        ));
+    }
+
+    #[test]
+    fn rejects_invalid_attachment_base64() {
+        let bad_attachment =
+            r#"[{"filename":"a.bin","mimeType":"application/octet-stream","contentBase64":"!!!"}]"#;
+
+        // sendEmail builds the MIME before sending anything.
         let mut script = Script::new();
-        assert!(matches!(
-            script.call("searchEmails", "not json").unwrap_err(),
-            ConnectorError::InvalidInput(_)
-        ));
+        let body = format!(
+            r#"{{"to":["a@b.c"],"subject":"s","body":"b","attachments":{bad_attachment}}}"#
+        );
+        let error = script.call("sendEmail", &body).unwrap_err();
+        assert!(matches!(error, ConnectorError::InvalidInput(_))); // coverage: exclude — matches! false arm is unreachable in a passing test
+        assert!(script.seen.is_empty());
+
+        // replyToEmail reads the original first, then fails building the MIME.
+        let mut script = Script::new().will_answer(ok(&metadata_fixture()));
+        let body = format!(r#"{{"messageId":"m1","body":"b","attachments":{bad_attachment}}}"#);
+        let error = script.call("replyToEmail", &body).unwrap_err();
+        assert!(matches!(error, ConnectorError::InvalidInput(_))); // coverage: exclude — matches! false arm is unreachable in a passing test
+        assert_eq!(script.seen.len(), 1);
+
+        // saveDraft with no in-reply-to also builds before sending.
+        let mut script = Script::new();
+        let body = format!(r#"{{"body":"b","attachments":{bad_attachment}}}"#);
+        let error = script.call("saveDraft", &body).unwrap_err();
+        assert!(matches!(error, ConnectorError::InvalidInput(_))); // coverage: exclude — matches! false arm is unreachable in a passing test
         assert!(script.seen.is_empty());
     }
 

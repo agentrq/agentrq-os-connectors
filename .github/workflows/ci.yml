@@ -30,10 +30,11 @@ jobs:
 
       - name: Tests with 100% coverage gate
         working-directory: ${{ matrix.connector }}
-        # Lines and functions at 100%. Regions are not gated: the remaining
-        # uncovered regions are error paths on infallible operations
-        # (e.g. serializing a serde_json::Value), which cannot be triggered.
-        run: cargo llvm-cov --fail-under-lines 100 --fail-under-functions 100
+        # Soft coverage (lines) and hard coverage (regions) at 100%.
+        # Regions may carry a `// coverage: exclude — <reason>` note for the
+        # genuinely uncoverable (e.g. error arms on infallible serialization);
+        # the linter rejects notes without a reason and notes gone stale.
+        run: node ../scripts/check-coverage.mjs .
 
   shim-test:
     name: test (sdk/connectors-sdk)

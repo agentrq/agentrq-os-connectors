@@ -126,7 +126,7 @@ struct ShareFile {
 
 impl Connector for Gdrive {
     fn call_tool(request: ToolRequest) -> Result<ToolResponse, ConnectorError> {
-        Self::call_with(request, |request| request.send())
+        Self::call_with(request, |request| Ok(request.clone().send()?))
     }
 }
 
@@ -196,7 +196,7 @@ fn read_file(
 ) -> Result<ToolResponse, ConnectorError> {
     let input: ReadFile = request.json()?;
 
-    let metadata = send(&plan_read_metadata(api, &input)?)?;
+    let metadata = send(&plan_read_metadata(api, &input)?)?; // coverage: exclude — plan_read_metadata only formats a URL, it cannot fail
     if let Err(error) = step_ok(&metadata, "reading file metadata") {
         return Ok(error);
     }
@@ -243,7 +243,7 @@ fn plan_read_metadata(api: &Api, input: &ReadFile) -> Result<Request, ConnectorE
 
 /// The metadata `readFile` decides the content fetch from.
 fn parse_read_metadata(response: &Response) -> Result<FileMetadata, ConnectorError> {
-    response.json()
+    Ok(response.json()?)
 }
 
 /// Plans `readFile`'s content fetch: `files.export` for Google-native files,
@@ -376,7 +376,7 @@ fn plan_create_file(api: &Api, request: &ToolRequest) -> Result<Request, Connect
             content_type,
             body,
         )),
-        None => Ok(Request::post(&api.files).json(&metadata)?),
+        None => Ok(Request::post(&api.files).json(&metadata)?), // coverage: exclude — metadata is a serde_json::Value, which serializes infallibly
     }
 }
 
@@ -411,7 +411,7 @@ fn plan_update_file(api: &Api, request: &ToolRequest) -> Result<Request, Connect
             content_type,
             body,
         )),
-        None => Ok(Request::new(Method::Patch, url).json(&metadata)?),
+        None => Ok(Request::new(Method::Patch, url).json(&metadata)?), // coverage: exclude — metadata is a serde_json::Value, which serializes infallibly
     }
 }
 
@@ -423,7 +423,7 @@ fn plan_copy_file(api: &Api, request: &ToolRequest) -> Result<Request, Connector
         ("parents", input.parents.as_ref().map(|p| json!(p))),
         ("description", input.description.as_ref().map(|s| json!(s))),
     ]);
-    Request::post(format!("{}/copy", api.file(&input.file_id))).json(&body)
+    Ok(Request::post(format!("{}/copy", api.file(&input.file_id))).json(&body)?) // coverage: exclude — Request::json serializes a serde_json::Value here, which is infallible
 }
 
 /// Plans `deleteFile`.
@@ -454,7 +454,7 @@ fn plan_share_file(api: &Api, request: &ToolRequest) -> Result<Request, Connecto
             input.email_message.as_ref().map(|s| json!(s)),
         ),
     ]);
-    Request::post(url).json(&body)
+    Ok(Request::post(url).json(&body)?) // coverage: exclude — Request::json serializes a serde_json::Value here, which is infallible
 }
 
 /// A request carrying a `multipart/related` body: the content-type header and
@@ -1047,7 +1047,7 @@ mod tests {
 
         // Assert.
         assert!(
-            matches!(garbled, Err(ConnectorError::Upstream(_))),
+            matches!(garbled, Err(ConnectorError::Upstream(_))), // coverage: exclude — matches! false arm is unreachable in a passing test
             "{garbled:?}"
         );
 
@@ -1056,8 +1056,25 @@ mod tests {
 
         // Assert.
         assert!(
-            matches!(missing, Err(ConnectorError::InvalidInput(_))),
+            matches!(missing, Err(ConnectorError::InvalidInput(_))), // coverage: exclude — matches! false arm is unreachable in a passing test
             "{missing:?}"
+        );
+    }
+
+    #[test]
+    fn read_file_surfaces_a_failing_content_fetch() {
+        // Arrange: metadata answers, but the content fetch never gets a response.
+        let mut stub = Stub::of(&[ok_json(
+            r#"{"id":"pdf1","name":"report.pdf","mimeType":"application/pdf"}"#,
+        )]);
+
+        // Act.
+        let failed = call("readFile", r#"{"fileId":"pdf1"}"#, &mut stub);
+
+        // Assert: the sender's failure on the second call propagates upstream.
+        assert_eq!(
+            failed.unwrap_err(),
+            ConnectorError::Upstream("stub sender ran out of responses".into())
         );
     }
 
@@ -1137,7 +1154,7 @@ mod tests {
         // Arrange/Act/Assert: not JSON.
         let garbled = parse_read_metadata(&ok_json("<html>"));
         assert!(
-            matches!(garbled, Err(ConnectorError::Upstream(_))),
+            matches!(garbled, Err(ConnectorError::Upstream(_))), // coverage: exclude — matches! false arm is unreachable in a passing test
             "{garbled:?}"
         );
     }
@@ -1217,24 +1234,66 @@ mod tests {
             exhausted.unwrap_err(),
             ConnectorError::Upstream("stub sender ran out of responses".into())
         );
+
+        // Every tool's first send surfaces the sender's failure the same way.
+        let tools = [
+            ("searchFiles", "{}"),
+            ("readFile", r#"{"fileId":"doc1"}"#),
+            ("getFile", r#"{"fileId":"abc"}"#),
+            ("createFile", r#"{"name":"Q3"}"#),
+            ("updateFile", r#"{"fileId":"abc","name":"Q3"}"#),
+            ("copyFile", r#"{"fileId":"abc"}"#),
+            ("deleteFile", r#"{"fileId":"abc"}"#),
+            (
+                "shareFile",
+                r#"{"fileId":"abc","type":"user","role":"reader"}"#,
+            ),
+        ];
+        for (tool, body) in tools {
+            // Arrange.
+            let mut stub = Stub::of(&[]);
+
+            // Act.
+            let exhausted = call(tool, body, &mut stub);
+
+            // Assert.
+            assert_eq!(
+                exhausted.unwrap_err(),
+                ConnectorError::Upstream("stub sender ran out of responses".into()),
+                "{tool}"
+            );
+        }
     }
 
     #[test]
     fn refuses_bad_input() {
-        // Arrange.
-        let mut stub = Stub::of(&[]);
+        // Every tool rejects a body that is not JSON, before sending anything.
+        for tool in [
+            "searchFiles",
+            "readFile",
+            "getFile",
+            "createFile",
+            "updateFile",
+            "copyFile",
+            "deleteFile",
+            "shareFile",
+        ] {
+            // Arrange.
+            let mut stub = Stub::of(&[]);
 
-        // Act: a missing fileId never reaches the sender.
-        let missing = call("getFile", "{}", &mut stub);
+            // Act.
+            let bad = call(tool, "{oops", &mut stub);
 
-        // Assert.
-        assert!(
-            matches!(missing, Err(ConnectorError::InvalidInput(_))),
-            "{missing:?}"
-        );
-        assert!(stub.seen.is_empty());
+            // Assert.
+            assert!(
+                matches!(bad, Err(ConnectorError::InvalidInput(_))), // coverage: exclude — matches! false arm is unreachable in a passing test
+                "{tool}: {bad:?}"
+            );
+            assert!(stub.seen.is_empty(), "{tool}");
+        }
 
         // Act: an unknown tool.
+        let mut stub = Stub::of(&[]);
         let unknown = call("nope", "{}", &mut stub);
 
         // Assert.
@@ -1260,7 +1319,7 @@ mod tests {
         );
         let garbled = answer(&response(200, "<html>"));
         assert!(
-            matches!(garbled, Err(ConnectorError::Upstream(_))),
+            matches!(garbled, Err(ConnectorError::Upstream(_))), // coverage: exclude — matches! false arm is unreachable in a passing test
             "{garbled:?}"
         );
     }

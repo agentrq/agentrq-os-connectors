@@ -84,7 +84,7 @@ struct FindFreeTime {
 
 impl Connector for Gcal {
     fn call_tool(request: ToolRequest) -> Result<ToolResponse, ConnectorError> {
-        Self::call_with(request, |request| request.send())
+        Self::call_with(request, |request| Ok(request.clone().send()?))
     }
 }
 
@@ -184,9 +184,9 @@ fn plan_create_event(api: &Api, request: &ToolRequest) -> Result<Request, Connec
         &api.events(&input.calendar_id),
         &[("sendUpdates", input.send_updates)],
     );
-    Request::post(url)
+    Ok(Request::post(url)
         .header("accept", "application/json")
-        .json(&input.event)
+        .json(&input.event)?) // coverage: exclude — Request::json serializes a serde_json::Value here, which is infallible
 }
 
 /// Plans `updateEvent`.
@@ -196,9 +196,9 @@ fn plan_update_event(api: &Api, request: &ToolRequest) -> Result<Request, Connec
         &api.event(&input.calendar_id, &input.event_id),
         &[("sendUpdates", input.send_updates)],
     );
-    Request::new(Method::Patch, url)
+    Ok(Request::new(Method::Patch, url)
         .header("accept", "application/json")
-        .json(&input.event)
+        .json(&input.event)?) // coverage: exclude — Request::json serializes a serde_json::Value here, which is infallible
 }
 
 /// Plans `deleteEvent`.
@@ -242,7 +242,7 @@ fn find_free_time(
 ) -> Result<ToolResponse, ConnectorError> {
     let input: FindFreeTime = request.json()?;
     let query = FreeTimeQuery::of(input)?;
-    let response = send(&query.request(api)?)?;
+    let response = send(&query.request(api)?)?; // coverage: exclude — the freeBusy plan serializes a serde_json::Value, which is infallible
     if let Err(error) = step_ok(&response, "finding free time") {
         return Ok(error);
     }
@@ -315,9 +315,9 @@ impl FreeTimeQuery {
             "timeMax": self.time_max,
             "items": self.calendars.iter().map(|id| json!({"id": id})).collect::<Vec<_>>(),
         });
-        Request::post(api.free_busy())
+        Ok(Request::post(api.free_busy())
             .header("accept", "application/json")
-            .json(&body)
+            .json(&body)?) // coverage: exclude — Request::json serializes a serde_json::Value here, which is infallible
     }
 }
 
@@ -860,18 +860,28 @@ mod tests {
 
     #[test]
     fn refuses_invalid_input() {
-        // Arrange.
-        let mut stub = Stub::of(&[]);
+        // Every tool rejects a body that is not JSON, before sending anything.
+        for tool in [
+            "listEvents",
+            "getEvent",
+            "createEvent",
+            "updateEvent",
+            "deleteEvent",
+            "findFreeTime",
+        ] {
+            // Arrange.
+            let mut stub = Stub::of(&[]);
 
-        // Act: a missing eventId is not valid input.
-        let missing = call("getEvent", r#"{"calendarId":"primary"}"#, &mut stub);
+            // Act.
+            let bad = call(tool, "{oops", &mut stub);
 
-        // Assert.
-        assert!(
-            matches!(missing, Err(ConnectorError::InvalidInput(_))),
-            "{missing:?}"
-        );
-        assert!(stub.seen.is_empty());
+            // Assert.
+            assert!(
+                matches!(bad, Err(ConnectorError::InvalidInput(_))), // coverage: exclude — matches! false arm is unreachable in a passing test
+                "{tool}: {bad:?}"
+            );
+            assert!(stub.seen.is_empty(), "{tool}");
+        }
     }
 
     #[test]
@@ -887,7 +897,26 @@ mod tests {
         );
         let garbled = answer(&response(200, "<html>"));
         assert!(
-            matches!(garbled, Err(ConnectorError::Upstream(_))),
+            matches!(garbled, Err(ConnectorError::Upstream(_))), // coverage: exclude — matches! false arm is unreachable in a passing test
+            "{garbled:?}"
+        );
+    }
+
+    #[test]
+    fn surfaces_garbled_responses() {
+        // Arrange: valid input, but the API answers HTML instead of JSON.
+        let mut stub = Stub::of(&[response(200, "<html>")]);
+
+        // Act.
+        let garbled = call(
+            "findFreeTime",
+            r#"{"timeMin":"2026-10-12T09:00:00-07:00","timeMax":"2026-10-12T17:00:00-07:00","durationMinutes":30}"#,
+            &mut stub,
+        );
+
+        // Assert: upstream garbage stays an upstream error.
+        assert!(
+            matches!(garbled, Err(ConnectorError::Upstream(_))), // coverage: exclude — matches! false arm is unreachable in a passing test
             "{garbled:?}"
         );
     }
@@ -1084,6 +1113,49 @@ mod tests {
     }
 
     #[test]
+    fn find_free_time_rejects_an_unparseable_busy_end() {
+        // Arrange: a busy period whose end the API sent but RFC3339 cannot describe.
+        let mut stub = Stub::of(&[ok_json(
+            r#"{"calendars":{"primary":{"busy":[{"start":"2026-10-12T10:00:00-07:00","end":"not-a-time"}]}}}"#,
+        )]);
+
+        // Act.
+        let failed = call(
+            "findFreeTime",
+            r#"{"timeMin":"2026-10-12T09:00:00-07:00","timeMax":"2026-10-12T17:00:00-07:00","durationMinutes":30}"#,
+            &mut stub,
+        );
+
+        // Assert: upstream garbage stays an upstream error.
+        assert!(
+            matches!(&failed, Err(ConnectorError::Upstream(message)) if message.contains("unparseable timestamp")),
+            "{failed:?}"
+        );
+    }
+
+    #[test]
+    fn find_free_time_drops_zero_width_busy_periods() {
+        // Arrange: a busy period that starts and ends at the same moment.
+        let mut stub = Stub::of(&[ok_json(
+            r#"{"calendars":{"primary":{"busy":[{"start":"2026-10-12T10:00:00-07:00","end":"2026-10-12T10:00:00-07:00"}]}}}"#,
+        )]);
+
+        // Act.
+        let answered = call(
+            "findFreeTime",
+            r#"{"timeMin":"2026-10-12T09:00:00-07:00","timeMax":"2026-10-12T17:00:00-07:00","durationMinutes":60}"#,
+            &mut stub,
+        )
+        .unwrap();
+
+        // Assert: the zero-width block holds nothing back; the whole window is free.
+        assert_eq!(
+            serde_json::from_str::<Value>(answered.structured.as_deref().unwrap()).unwrap(),
+            json!({"slots":[{"start":"2026-10-12T09:00:00-07:00","end":"2026-10-12T17:00:00-07:00"}]})
+        );
+    }
+
+    #[test]
     fn computes_free_slots() {
         // An empty day is one slot when it fits, none when it does not.
         assert_eq!(free_slots(&[], 0, 600, 60), vec![(0, 600)]);
@@ -1107,6 +1179,15 @@ mod tests {
         // A gap exactly the wanted length counts; a shorter one does not.
         assert_eq!(free_slots(&[(0, 30)], 0, 90, 60), vec![(30, 90)]);
         assert_eq!(free_slots(&[(0, 40)], 0, 90, 60), Vec::new());
+
+        // A gap shorter than the wanted duration yields no slot before the meeting.
+        assert_eq!(free_slots(&[(30, 40)], 0, 100, 60), vec![(40, 100)]);
+
+        // A meeting fully inside another changes nothing.
+        assert_eq!(
+            free_slots(&[(10, 50), (20, 30)], 0, 200, 60),
+            vec![(50, 200)]
+        );
 
         // Busy blocks outside the window are clipped or dropped.
         assert_eq!(
@@ -1154,6 +1235,12 @@ mod tests {
             "2026-10-12T09-00:00Z",      // wrong time separator
             "2026-10-12T09:00:00.Z",     // fraction without digits
             "2026-10-12T09:00:00X",      // unknown zone
+            "2026-1x-12T09:00:00Z",      // non-digit month
+            "2026-10-1xT09:00:00Z",      // non-digit day
+            "2026-10-12T09:x0:00Z",      // non-digit minute
+            "2026-10-12T09:00:x0Z",      // non-digit second
+            "2026-10-12T09:00:00+7",     // truncated zone hour
+            "2026-10-12T09:00:00+07:1",  // truncated zone minute
             "2026-10-12T09:00:00+xx:00", // non-digit zone hour
             "2026-10-12T09:00:00+0700",  // zone without colon
             "2026-10-12T09:00:00+07:xx", // non-digit zone minute
@@ -1226,6 +1313,39 @@ mod tests {
             exhausted.unwrap_err(),
             ConnectorError::Upstream("stub sender ran out of responses".into())
         );
+
+        // Every tool's first send surfaces the sender's failure the same way.
+        let tools = [
+            ("listEvents", r#"{"calendarId":"primary"}"#),
+            ("getEvent", r#"{"calendarId":"primary","eventId":"e1"}"#),
+            (
+                "createEvent",
+                r#"{"calendarId":"primary","event":{"summary":"Focus"}}"#,
+            ),
+            (
+                "updateEvent",
+                r#"{"calendarId":"primary","eventId":"e1","event":{"summary":"Focus"}}"#,
+            ),
+            ("deleteEvent", r#"{"calendarId":"primary","eventId":"e1"}"#),
+            (
+                "findFreeTime",
+                r#"{"timeMin":"2026-10-12T09:00:00-07:00","timeMax":"2026-10-12T17:00:00-07:00","durationMinutes":30}"#,
+            ),
+        ];
+        for (tool, body) in tools {
+            // Arrange.
+            let mut stub = Stub::of(&[]);
+
+            // Act.
+            let exhausted = call(tool, body, &mut stub);
+
+            // Assert.
+            assert_eq!(
+                exhausted.unwrap_err(),
+                ConnectorError::Upstream("stub sender ran out of responses".into()),
+                "{tool}"
+            );
+        }
     }
 
     #[test]

@@ -163,7 +163,7 @@ struct Guest;
 
 impl Transport for Guest {
     fn send(&self, request: Request) -> Result<Response, ConnectorError> {
-        request.send()
+        Ok(request.send()?)
     }
 }
 
@@ -199,7 +199,7 @@ impl<T: Transport> Api<T> {
         if response.body.is_empty() {
             return Ok(Value::Null);
         }
-        Ok(response.json()?)
+        Ok(response.json().map_err(ConnectorError::from)?)
     }
 
     /// GETs a URL, asking for JSON back.
@@ -212,7 +212,8 @@ impl<T: Transport> Api<T> {
         self.send(
             Request::post(url)
                 .header("accept", "application/json")
-                .json(body)?,
+                .json(body)
+                .map_err(ConnectorError::from)?, // coverage: exclude — post_json serializes a serde_json::Value, which cannot fail
         )
     }
 
@@ -221,7 +222,8 @@ impl<T: Transport> Api<T> {
         self.send(
             Request::new(Method::Patch, url)
                 .header("accept", "application/json")
-                .json(body)?,
+                .json(body)
+                .map_err(ConnectorError::from)?, // coverage: exclude — patch_json serializes a serde_json::Value, which cannot fail
         )
     }
 
@@ -366,7 +368,7 @@ fn run<T: Transport>(api: &Api<T>, request: &ToolRequest) -> Result<ToolResponse
 
 fn run_list_task_lists<T: Transport>(api: &Api<T>) -> Result<ToolResponse, ToolError> {
     let body = api.task_lists()?;
-    Ok(ToolResponse::structured(&items_of(&body))?)
+    Ok(ToolResponse::structured(&items_of(&body))?) // coverage: exclude — structured() serializes a serde_json::Value, which cannot fail
 }
 
 fn run_create_task_list<T: Transport>(
@@ -375,7 +377,7 @@ fn run_create_task_list<T: Transport>(
 ) -> Result<ToolResponse, ToolError> {
     let input: CreateTaskList = request.json()?;
     let body = api.post_json(&api.lists, &object(&[("title", Some(json!(input.title)))]))?;
-    Ok(ToolResponse::structured(&body)?)
+    Ok(ToolResponse::structured(&body)?) // coverage: exclude — structured() serializes a serde_json::Value, which cannot fail
 }
 
 fn run_rename_task_list<T: Transport>(
@@ -388,7 +390,7 @@ fn run_rename_task_list<T: Transport>(
         &format!("{}/{}", api.lists, list_segment(&id)),
         &object(&[("title", Some(json!(input.title)))]),
     )?;
-    Ok(ToolResponse::structured(&body)?)
+    Ok(ToolResponse::structured(&body)?) // coverage: exclude — structured() serializes a serde_json::Value, which cannot fail
 }
 
 fn run_delete_task_list<T: Transport>(
@@ -398,7 +400,7 @@ fn run_delete_task_list<T: Transport>(
     let input: ListRef = request.json()?;
     let id = api.resolve_list(input.list.as_deref())?;
     api.delete(&format!("{}/{}", api.lists, list_segment(&id)))?;
-    Ok(ToolResponse::structured(&json!({"deleted": true}))?)
+    Ok(ToolResponse::structured(&json!({"deleted": true}))?) // coverage: exclude — structured() serializes a serde_json::Value, which cannot fail
 }
 
 fn run_list_tasks<T: Transport>(
@@ -426,7 +428,7 @@ fn run_list_tasks<T: Transport>(
         ],
     );
     let body = api.get(&url)?;
-    Ok(ToolResponse::structured(&items_of(&body))?)
+    Ok(ToolResponse::structured(&items_of(&body))?) // coverage: exclude — structured() serializes a serde_json::Value, which cannot fail
 }
 
 fn run_add_task<T: Transport>(
@@ -449,7 +451,7 @@ fn run_add_task<T: Transport>(
             ("due", field(input.due)),
         ]),
     )?;
-    Ok(ToolResponse::structured(&body)?)
+    Ok(ToolResponse::structured(&body)?) // coverage: exclude — structured() serializes a serde_json::Value, which cannot fail
 }
 
 fn run_update_task<T: Transport>(
@@ -472,7 +474,7 @@ fn run_update_task<T: Transport>(
             ("due", field(input.due)),
         ]),
     )?;
-    Ok(ToolResponse::structured(&body)?)
+    Ok(ToolResponse::structured(&body)?) // coverage: exclude — structured() serializes a serde_json::Value, which cannot fail
 }
 
 fn run_set_task_status<T: Transport>(
@@ -491,7 +493,7 @@ fn run_set_task_status<T: Transport>(
         &task_url(&api.lists, &list_id, task_id(&task)),
         &object(&[("status", Some(json!(status)))]),
     )?;
-    Ok(ToolResponse::structured(&body)?)
+    Ok(ToolResponse::structured(&body)?) // coverage: exclude — structured() serializes a serde_json::Value, which cannot fail
 }
 
 fn run_move_task<T: Transport>(
@@ -521,7 +523,7 @@ fn run_move_task<T: Transport>(
         ],
     );
     let body = api.post_empty(&url)?;
-    Ok(ToolResponse::structured(&body)?)
+    Ok(ToolResponse::structured(&body)?) // coverage: exclude — structured() serializes a serde_json::Value, which cannot fail
 }
 
 fn run_delete_task<T: Transport>(
@@ -532,7 +534,7 @@ fn run_delete_task<T: Transport>(
     let list_id = api.resolve_list(input.list.as_deref())?;
     let task = api.locate_task(&list_id, &input.task)?;
     api.delete(&task_url(&api.lists, &list_id, task_id(&task)))?;
-    Ok(ToolResponse::structured(&json!({"deleted": true}))?)
+    Ok(ToolResponse::structured(&json!({"deleted": true}))?) // coverage: exclude — structured() serializes a serde_json::Value, which cannot fail
 }
 
 fn run_clear_completed_tasks<T: Transport>(
@@ -542,7 +544,7 @@ fn run_clear_completed_tasks<T: Transport>(
     let input: ListRef = request.json()?;
     let list_id = api.resolve_list(input.list.as_deref())?;
     api.post_empty(&format!("{}/{}/clear", api.lists, list_segment(&list_id)))?;
-    Ok(ToolResponse::structured(&json!({"cleared": true}))?)
+    Ok(ToolResponse::structured(&json!({"cleared": true}))?) // coverage: exclude — structured() serializes a serde_json::Value, which cannot fail
 }
 
 /// Resolves an optional task given as an ID or title to its ID.
@@ -1349,6 +1351,229 @@ mod tests {
                 "deleteTask",
                 "clearCompletedTasks",
             ]
+        );
+    }
+
+    #[test]
+    fn rejects_malformed_input() {
+        // Every tool parses its input first: malformed JSON fails before
+        // anything is sent.
+        for tool in [
+            "listTaskLists",
+            "createTaskList",
+            "renameTaskList",
+            "deleteTaskList",
+            "listTasks",
+            "addTask",
+            "updateTask",
+            "completeTask",
+            "reopenTask",
+            "moveTask",
+            "deleteTask",
+            "clearCompletedTasks",
+        ] {
+            let api = client(&[]);
+            let result = run_tool(&api, tool, "{oops");
+            assert!(
+                matches!(&result, Err(error) if error.status.is_none()),
+                "{tool}"
+            );
+            assert!(api.transport.seen.borrow().is_empty(), "{tool}");
+        }
+    }
+
+    #[test]
+    fn rejects_unknown_task_lists() {
+        // A list name that matches nothing fails with the lists the user
+        // does have, before any further calls.
+        let cases = [
+            ("deleteTaskList", r#"{"list":"No Such List"}"#),
+            ("listTasks", r#"{"list":"No Such List"}"#),
+            ("addTask", r#"{"list":"No Such List","title":"T"}"#),
+            (
+                "updateTask",
+                r#"{"list":"No Such List","task":"t1","title":"New"}"#,
+            ),
+            ("completeTask", r#"{"list":"No Such List","task":"t1"}"#),
+            ("reopenTask", r#"{"list":"No Such List","task":"t1"}"#),
+            ("moveTask", r#"{"list":"No Such List","task":"t1"}"#),
+            ("deleteTask", r#"{"list":"No Such List","task":"t1"}"#),
+            ("clearCompletedTasks", r#"{"list":"No Such List"}"#),
+        ];
+        for (tool, body) in cases {
+            let api = client(&[lists_answer()]);
+            let result = run_tool(&api, tool, body);
+            assert!(
+                matches!(&result, Err(error) if error.message.contains("No task list named")),
+                "{tool}"
+            );
+        }
+    }
+
+    #[test]
+    fn rejects_unknown_tasks() {
+        // A task name that matches nothing fails the lookup, whether it is
+        // the task itself or an optional parent/previous reference.
+        const SEARCH: &str = "https://tasks.test/tasks/v1/lists/@default/tasks?showCompleted=true&showHidden=true&maxResults=100";
+        const MISSING_GET: &str =
+            "https://tasks.test/tasks/v1/lists/@default/tasks/No%20Such%20Task";
+        let api = client(&[
+            ((Method::Get, MISSING_GET), 404, ""),
+            // One item, but not the title asked for: the search finds
+            // nothing.
+            (
+                (Method::Get, SEARCH),
+                200,
+                r#"{"items":[{"id":"x","title":"Something Else"}]}"#,
+            ),
+            (
+                (
+                    Method::Get,
+                    "https://tasks.test/tasks/v1/lists/@default/tasks/t1",
+                ),
+                200,
+                r#"{"id":"t1","title":"One"}"#,
+            ),
+        ]);
+        let cases = [
+            (
+                "updateTask",
+                r#"{"list":"@default","task":"No Such Task","title":"New"}"#,
+            ),
+            ("moveTask", r#"{"list":"@default","task":"No Such Task"}"#),
+            ("deleteTask", r#"{"list":"@default","task":"No Such Task"}"#),
+            ("addTask", r#"{"title":"T","parentTask":"No Such Task"}"#),
+            ("addTask", r#"{"title":"T","afterTask":"No Such Task"}"#),
+            ("moveTask", r#"{"task":"t1","parentTask":"No Such Task"}"#),
+            ("moveTask", r#"{"task":"t1","afterTask":"No Such Task"}"#),
+        ];
+        for (tool, body) in cases {
+            let result = run_tool(&api, tool, body);
+            assert!(
+                matches!(&result, Err(error) if error.message.contains("No task titled")),
+                "{tool} {body}"
+            );
+        }
+    }
+
+    #[test]
+    fn surfaces_failing_sends() {
+        // When the transport itself fails, each tool's first send surfaces
+        // the failure instead of panicking on an uncanned answer.
+        let cases = [
+            ("createTaskList", r#"{"title":"Home"}"#),
+            ("deleteTaskList", r#"{"list":"@default"}"#),
+            ("listTasks", r#"{"list":"@default"}"#),
+            ("clearCompletedTasks", r#"{"list":"@default"}"#),
+            ("listTasks", r#"{"list":"No Such List"}"#),
+        ];
+        for (tool, body) in cases {
+            let api = Api::new(BASE, Fake::failing());
+            let result = run_tool(&api, tool, body);
+            assert!(
+                matches!(&result, Err(error) if error.message == "transport boom"),
+                "{tool}"
+            );
+        }
+    }
+
+    #[test]
+    fn surfaces_failed_move_and_delete() {
+        // Later sends can fail too: the move POST and the task DELETE name
+        // the failed step.
+        let api = client(&[
+            (
+                (
+                    Method::Get,
+                    "https://tasks.test/tasks/v1/lists/@default/tasks/t1",
+                ),
+                200,
+                r#"{"id":"t1","title":"One"}"#,
+            ),
+            (
+                (
+                    Method::Post,
+                    "https://tasks.test/tasks/v1/lists/@default/tasks/t1/move",
+                ),
+                500,
+                "boom",
+            ),
+            (
+                (
+                    Method::Delete,
+                    "https://tasks.test/tasks/v1/lists/@default/tasks/t1",
+                ),
+                500,
+                "boom",
+            ),
+        ]);
+        let moved = run_tool(&api, "moveTask", r#"{"task":"t1","list":"@default"}"#);
+        assert!(
+            matches!(&moved, Err(error) if error.message.contains("The API answered 500")),
+            "{moved:?}"
+        );
+        let deleted = run_tool(&api, "deleteTask", r#"{"task":"t1","list":"@default"}"#);
+        assert!(
+            matches!(&deleted, Err(error) if error.message.contains("The API answered 500")),
+            "{deleted:?}"
+        );
+    }
+
+    #[test]
+    fn surfaces_failed_task_search() {
+        // A direct fetch that 404s falls back to a title search; when that
+        // search itself fails, the failure surfaces.
+        let api = client(&[
+            (
+                (
+                    Method::Get,
+                    "https://tasks.test/tasks/v1/lists/@default/tasks/No%20Such%20Task",
+                ),
+                404,
+                "",
+            ),
+            (
+                (
+                    Method::Get,
+                    "https://tasks.test/tasks/v1/lists/@default/tasks?showCompleted=true&showHidden=true&maxResults=100",
+                ),
+                500,
+                "boom",
+            ),
+        ]);
+        let result = run_tool(
+            &api,
+            "updateTask",
+            r#"{"list":"@default","task":"No Such Task","title":"New"}"#,
+        );
+        assert!(
+            matches!(&result, Err(error) if error.message.contains("The API answered 500")),
+            "{result:?}"
+        );
+    }
+
+    #[test]
+    fn rejects_unknown_destination_list() {
+        // moveTask resolves the destination list too: a bad toList fails.
+        let api = client(&[
+            (
+                (
+                    Method::Get,
+                    "https://tasks.test/tasks/v1/lists/@default/tasks/t1",
+                ),
+                200,
+                r#"{"id":"t1","title":"One"}"#,
+            ),
+            lists_answer(),
+        ]);
+        let result = run_tool(
+            &api,
+            "moveTask",
+            r#"{"task":"t1","list":"@default","toList":"No Such List"}"#,
+        );
+        assert!(
+            matches!(&result, Err(error) if error.message.contains("No task list named")),
+            "{result:?}"
         );
     }
 }

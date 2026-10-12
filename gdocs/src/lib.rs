@@ -81,7 +81,7 @@ enum Edit {
 
 impl Connector for Gdocs {
     fn call_tool(request: ToolRequest) -> Result<ToolResponse, ConnectorError> {
-        Self::call_with(request, |request| request.send())
+        Self::call_with(request, |request| Ok(request.clone().send()?))
     }
 }
 
@@ -136,7 +136,7 @@ fn read_document(
     send: &mut impl FnMut(&Request) -> Result<Response, ConnectorError>,
 ) -> Result<ToolResponse, ConnectorError> {
     let input: ReadDocument = request.json()?;
-    let planned = plan_read_document(api, &input)?;
+    let planned = plan_read_document(api, &input)?; // coverage: exclude — plan_read_document wraps an infallible GET in Ok
     let response = match send_step(send, &planned, "reading the document") {
         Ok(response) => response,
         Err(error) => return Ok(error),
@@ -286,14 +286,14 @@ fn create_document(
             "title must not be empty".into(),
         ));
     }
-    let planned = plan_create_document(api, &input)?;
+    let planned = plan_create_document(api, &input)?; // coverage: exclude — plan_create_document builds from serde_json::Value, which serializes infallibly
     let created = match send_step(send, &planned, "creating the document") {
         Ok(created) => created,
         Err(error) => return Ok(error),
     };
     let document_id = parse_document_id(&created)?;
     if let Some(text) = input.text.as_deref().filter(|text| !text.is_empty()) {
-        let planned = plan_write_initial_text(api, &document_id, text)?;
+        let planned = plan_write_initial_text(api, &document_id, text)?; // coverage: exclude — plan_write_initial_text builds from serde_json::Value, which serializes infallibly
         match send_step(send, &planned, "writing the initial text") {
             Ok(_) => {}
             Err(error) => return Ok(error),
@@ -359,7 +359,7 @@ fn edit_document(
     if input.edits.is_empty() {
         return combine_edit_document(&input, 0);
     }
-    let planned = plan_edit_document(api, &input, &mut end)?;
+    let planned = plan_edit_document(api, &input, &mut end)?; // coverage: exclude — plan_edit_document builds from serde_json::Value, which serializes infallibly
     match send_step(send, &planned, "applying the edits") {
         Ok(_) => {}
         Err(error) => return Ok(error),
@@ -545,9 +545,9 @@ fn json_get(url: String) -> Request {
 
 /// A POST request carrying a JSON body, expecting a JSON answer.
 fn json_post(url: String, body: &Value) -> Result<Request, ConnectorError> {
-    Request::post(url)
+    Ok(Request::post(url)
         .header("accept", "application/json")
-        .json(body)
+        .json(body)?) // coverage: exclude — Request::json serializes a serde_json::Value here, which is infallible
 }
 
 /// Appends the present query parameters to `url`, percent-encoding each value.
@@ -762,7 +762,20 @@ mod tests {
 
         // Assert: an upstream contract break is a call error.
         assert!(
-            matches!(garbled, Err(ConnectorError::Upstream(_))),
+            matches!(garbled, Err(ConnectorError::Upstream(_))), // coverage: exclude — matches! false arm is unreachable in a passing test
+            "{garbled:?}"
+        );
+
+        // Arrange: createDocument's answer is parsed for the new ID; a 2xx
+        // answer that is not JSON must surface as Upstream there too.
+        let mut stub = Stub::of(&[ok_json("<html>")]);
+
+        // Act.
+        let garbled = call("createDocument", r#"{"title":"One"}"#, &mut stub);
+
+        // Assert.
+        assert!(
+            matches!(garbled, Err(ConnectorError::Upstream(_))), // coverage: exclude — matches! false arm is unreachable in a passing test
             "{garbled:?}"
         );
 
@@ -1119,7 +1132,7 @@ mod tests {
 
             // Assert.
             assert!(
-                matches!(refused, Err(ConnectorError::InvalidInput(_))),
+                matches!(refused, Err(ConnectorError::InvalidInput(_))), // coverage: exclude — matches! false arm is unreachable in a passing test
                 "{tool} {body}: {refused:?}"
             );
         }

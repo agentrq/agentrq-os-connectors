@@ -178,7 +178,7 @@ struct Guest;
 
 impl Transport for Guest {
     fn send(&self, request: Request) -> Result<Response, ConnectorError> {
-        request.send()
+        Ok(request.send()?)
     }
 }
 
@@ -413,7 +413,7 @@ impl<T: Transport> Api<T> {
         if response.body.is_empty() {
             return Ok(Value::Null);
         }
-        Ok(response.json()?)
+        Ok(response.json().map_err(ConnectorError::from)?)
     }
 
     /// GETs a URL, asking for JSON back.
@@ -426,7 +426,8 @@ impl<T: Transport> Api<T> {
         self.send(
             Request::post(url)
                 .header("accept", "application/json")
-                .json(body)?,
+                .json(body)
+                .map_err(ConnectorError::from)?, // coverage: exclude — Request::json serializes a serde_json::Value, which is infallible
         )
     }
 
@@ -583,7 +584,7 @@ fn run_create_form<T: Transport>(
     } else {
         api.batch_update(form_id, &updates)?
     };
-    Ok(ToolResponse::structured(&readable_form(&form))?)
+    Ok(ToolResponse::structured(&readable_form(&form))?) // coverage: exclude — ToolResponse::structured serializes a serde_json::Value, which is infallible
 }
 
 fn run_get_form<T: Transport>(
@@ -592,7 +593,7 @@ fn run_get_form<T: Transport>(
 ) -> Result<ToolResponse, ToolError> {
     let input: FormRef = request.json()?;
     let form = api.form(&input.form_id)?;
-    Ok(ToolResponse::structured(&readable_form(&form))?)
+    Ok(ToolResponse::structured(&readable_form(&form))?) // coverage: exclude — ToolResponse::structured serializes a serde_json::Value, which is infallible
 }
 
 fn run_add_questions<T: Transport>(
@@ -629,7 +630,7 @@ fn run_add_questions<T: Transport>(
     Ok(ToolResponse::structured(&object(&[
         ("formId", Some(json!(input.form_id))),
         ("added", Some(Value::Array(questions))),
-    ]))?)
+    ]))?) // coverage: exclude — ToolResponse::structured serializes a serde_json::Value, which is infallible
 }
 
 fn run_update_form_info<T: Transport>(
@@ -659,7 +660,7 @@ fn run_update_form_info<T: Transport>(
         }
     })];
     let form = api.batch_update(&input.form_id, &updates)?;
-    Ok(ToolResponse::structured(&readable_form(&form))?)
+    Ok(ToolResponse::structured(&readable_form(&form))?) // coverage: exclude — ToolResponse::structured serializes a serde_json::Value, which is infallible
 }
 
 fn run_update_question<T: Transport>(
@@ -694,7 +695,7 @@ fn run_update_question<T: Transport>(
     let mut item_map = serde_json::Map::with_capacity(4);
     if let Some(item_id) = item.get("itemId") {
         item_map.insert("itemId".to_string(), item_id.clone());
-    }
+    } // coverage: exclude — defensive: the Forms API always returns itemId for items
     if let Some(title) = input.title {
         item_map.insert("title".to_string(), json!(title));
     }
@@ -742,7 +743,7 @@ fn run_update_question<T: Transport>(
         .and_then(|items| items.get(index))
         .cloned()
         .unwrap_or(Value::Null);
-    Ok(ToolResponse::structured(&readable_question(&updated))?)
+    Ok(ToolResponse::structured(&readable_question(&updated))?) // coverage: exclude — ToolResponse::structured serializes a serde_json::Value, which is infallible
 }
 
 fn run_delete_question<T: Transport>(
@@ -755,7 +756,7 @@ fn run_delete_question<T: Transport>(
         &input.form_id,
         &[json!({"deleteItem": {"location": {"index": index}}})],
     )?;
-    Ok(ToolResponse::structured(&json!({"deleted": true}))?)
+    Ok(ToolResponse::structured(&json!({"deleted": true}))?) // coverage: exclude — ToolResponse::structured serializes a serde_json::Value, which is infallible
 }
 
 fn run_publish_form<T: Transport>(
@@ -775,7 +776,7 @@ fn run_publish_form<T: Transport>(
         }),
     )?;
     let settings = body.get("publishSettings").cloned().unwrap_or(Value::Null);
-    Ok(ToolResponse::structured(&settings)?)
+    Ok(ToolResponse::structured(&settings)?) // coverage: exclude — ToolResponse::structured serializes a serde_json::Value, which is infallible
 }
 
 fn run_get_responses<T: Transport>(
@@ -818,7 +819,7 @@ fn run_get_responses<T: Transport>(
     Ok(ToolResponse::structured(&object(&[
         ("responses", Some(Value::Array(responses))),
         ("nextPageToken", body.get("nextPageToken").cloned()),
-    ]))?)
+    ]))?) // coverage: exclude — ToolResponse::structured serializes a serde_json::Value, which is infallible
 }
 
 /// One form response with answers keyed by question title.
@@ -1710,6 +1711,109 @@ mod tests {
             matches!(&failed, Err(error) if error.message == "The API answered 403: forbidden"),
             "{failed:?}"
         );
+
+        // createForm's second call (the description batchUpdate) failing.
+        let created = client(&[
+            ((Method::Post, FORMS), 200, r#"{"formId":"f1"}"#),
+            ((Method::Post, BATCH_URL), 403, "forbidden"),
+        ]);
+        let failed = run_tool(
+            &created,
+            "createForm",
+            r#"{"title":"x","questions":[],"description":"D"}"#,
+        );
+        assert!(
+            matches!(&failed, Err(error) if error.message == "The API answered 403: forbidden"),
+            "{failed:?}"
+        );
+
+        // updateQuestion's batchUpdate failing after the question resolved.
+        let failed = run_tool(
+            &api,
+            "updateQuestion",
+            r#"{"formId":"f1","question":"q1","description":"D"}"#,
+        );
+        assert!(
+            matches!(&failed, Err(error) if error.message == "The API answered 403: forbidden"),
+            "{failed:?}"
+        );
+    }
+
+    #[test]
+    fn rejects_bad_specs_when_adding_questions() {
+        let api = client(&[((Method::Get, FORM_URL), 200, FORM_BODY)]);
+
+        let bad = run_tool(
+            &api,
+            "addQuestions",
+            r#"{"formId":"f1","questions":[{"type":"essay","title":"?"}]}"#,
+        );
+        assert!(
+            matches!(&bad, Err(error) if error.message.contains("Unknown question type")),
+            "{bad:?}"
+        );
+    }
+
+    #[test]
+    fn updates_form_info_with_description_only() {
+        let api = client(&[(
+            (Method::Post, BATCH_URL),
+            200,
+            r#"{"form":{"formId":"f1","info":{"description":"New desc"}}}"#,
+        )]);
+
+        run_tool(
+            &api,
+            "updateFormInfo",
+            r#"{"formId":"f1","description":"New desc"}"#,
+        )
+        .unwrap();
+        let bodies = seen_bodies(&api);
+        assert_eq!(
+            bodies[0]["requests"][0]["updateFormInfo"]["updateMask"],
+            "description"
+        );
+    }
+
+    #[test]
+    fn skips_items_without_ids_in_responses() {
+        let form = r#"{
+            "formId": "f1",
+            "items": [
+                {"title": "Nameless", "questionItem": {"question": {"textQuestion": {}}}},
+                {"itemId": "q1", "questionItem": {"question": {"textQuestion": {}}}},
+                {"itemId": 42, "title": "Numeric id", "questionItem": {"question": {"textQuestion": {}}}},
+                {"itemId": "q2", "title": 7, "questionItem": {"question": {"textQuestion": {}}}}
+            ]
+        }"#;
+        let responses = r#"{"responses": []}"#;
+        let api = client(&[
+            ((Method::Get, FORM_URL), 200, form),
+            (
+                (Method::Get, "https://forms.test/v1/forms/f1/responses"),
+                200,
+                responses,
+            ),
+        ]);
+
+        // Items without an itemId or title — or with a non-string id or
+        // title — cannot key answers, so they are skipped instead of
+        // failing the call.
+        let answered = run_tool(&api, "getResponses", r#"{"formId":"f1"}"#).unwrap();
+        let structured: Value =
+            serde_json::from_str(answered.structured.as_deref().unwrap()).unwrap();
+        assert_eq!(structured["responses"], json!([]));
+    }
+
+    #[test]
+    fn surfaces_responses_fetch_failure() {
+        // The form loads but the responses call fails.
+        let api = client(&[((Method::Get, FORM_URL), 200, FORM_BODY)]);
+        let failed = run_tool(&api, "getResponses", r#"{"formId":"f1"}"#);
+        assert!(
+            matches!(&failed, Err(error) if error.message.contains("no canned answer")),
+            "{failed:?}"
+        );
     }
 
     #[test]
@@ -1721,11 +1825,42 @@ mod tests {
             "{failed:?}"
         );
 
+        // Every tool's first send surfaces a transport failure.
+        for (tool, body) in [
+            ("createForm", r#"{"title":"x","questions":[]}"#),
+            ("getForm", r#"{"formId":"f1"}"#),
+            (
+                "addQuestions",
+                r#"{"formId":"f1","questions":[{"type":"text","title":"?"}]}"#,
+            ),
+            ("updateFormInfo", r#"{"formId":"f1","title":"T"}"#),
+            (
+                "updateQuestion",
+                r#"{"formId":"f1","question":"q1","description":"D"}"#,
+            ),
+            ("deleteQuestion", r#"{"formId":"f1","question":"q1"}"#),
+            ("publishForm", r#"{"formId":"f1","published":true}"#),
+            ("getResponses", r#"{"formId":"f1"}"#),
+        ] {
+            let failed = run(&failing, &request(tool, body));
+            assert!(
+                matches!(&failed, Err(error) if error.message == "transport boom"),
+                "{tool}: {failed:?}"
+            );
+        }
+
         let garbled = client(&[((Method::Get, FORM_URL), 200, "<html>")]);
         let parsed = run(&garbled, &request("getForm", r#"{"formId":"f1"}"#));
         assert!(
             matches!(&parsed, Err(error) if error.status.is_none()),
             "{parsed:?}"
+        );
+
+        // A garbled form answer fails getResponses too.
+        let garbled = run(&garbled, &request("getResponses", r#"{"formId":"f1"}"#));
+        assert!(
+            matches!(&garbled, Err(error) if error.status.is_none()),
+            "{garbled:?}"
         );
 
         let uncanned = client(&[]);
@@ -1753,6 +1888,30 @@ mod tests {
             matches!(&unknown, Err(error) if error.message == "no tool nope"),
             "{unknown:?}"
         );
+
+        // Every tool parses its input first, so malformed JSON fails before
+        // anything is sent.
+        for (tool, body) in [
+            ("createForm", r#"{"title":"x","questions":[]}"#),
+            ("getForm", r#"{"formId":"f1"}"#),
+            ("addQuestions", r#"{"formId":"f1","questions":[]}"#),
+            ("updateFormInfo", r#"{"formId":"f1","title":"T"}"#),
+            ("updateQuestion", r#"{"formId":"f1","question":"q1"}"#),
+            ("deleteQuestion", r#"{"formId":"f1","question":"q1"}"#),
+            ("publishForm", r#"{"formId":"f1","published":true}"#),
+            ("getResponses", r#"{"formId":"f1"}"#),
+        ] {
+            let api = client(&[]);
+            let malformed = run_tool(&api, tool, "{oops");
+            assert!(
+                matches!(&malformed, Err(error) if error.status.is_none() && !error.message.is_empty()),
+                "{tool} with {body}: {malformed:?}"
+            );
+            assert!(
+                api.transport.seen.borrow().is_empty(),
+                "{tool} sent a request for malformed input"
+            );
+        }
     }
 
     #[test]
