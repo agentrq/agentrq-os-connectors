@@ -286,6 +286,34 @@ Two GitHub limits shape it:
   token's 5,000 requests an hour are also what makes a per-repository release
   check affordable.
 
+## Releasing this repository's connectors
+
+This repository is held to the same rule as any other. It is listed only when its
+latest release carries a `<connector name>.wasm` for **every** connector in
+[`connectors-manifest.json`](connectors-manifest.json). Releases come from
+[`release.yml`](.github/workflows/release.yml):
+
+```sh
+git tag v0.2.0 && git push origin v0.2.0   # or run "Release" from the Actions tab
+```
+
+That workflow builds each connector for `wasm32-wasip2` against the **real**
+`connectors-sdk` from `agentrq/connectors`, publishes the components as the
+release, and starts a catalogue rebuild. The `sdk/connectors-sdk` in this
+repository is a test double, and its `export_connector!` exports nothing. Since
+`agentrq/connectors` is private, the workflow needs a `CONNECTORS_SDK_TOKEN`
+secret that can read its contents. To build locally:
+
+```sh
+node scripts/build-release.mjs --sdk ../connectors/sdk/connectors-sdk --out dist
+```
+
+Only components belong in `connectors-manifest.json`. A remote MCP server has
+nothing to build, and the server installs a listed connector only from its
+release asset. List a remote server from its own repository instead, under
+`agentrq-remote-connector`. `build-release.mjs` refuses an index that lists a
+remote server.
+
 ## License
 
 AGPL-3.0-only. See [LICENSE](LICENSE).

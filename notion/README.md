@@ -5,6 +5,11 @@ MCP server at `https://mcp.notion.com/mcp`. This is a remote connector — there
 no Rust code to build; the tools are provided by Notion's server. Authenticate with
 your Notion account when prompted in the AgentRQ UI.
 
+It is not in `connectors-manifest.json`, because the catalogue installs a listed
+connector from its release asset and a remote server has no asset. To install it,
+use its URL: `connectors install https://mcp.notion.com/mcp` (or **Discover ›
+Remote MCP** in the web UI).
+
 ![icon](icon.svg)
 
 ## Tools

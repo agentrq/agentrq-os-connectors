@@ -41,9 +41,6 @@
       "manifest": "gtasks/manifest.json"
     },
     {
-      "manifest": "notion/manifest.json"
-    },
-    {
       "manifest": "outlook-mail/manifest.json"
     }
   ],
