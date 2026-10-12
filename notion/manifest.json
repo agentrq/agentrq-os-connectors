@@ -12,7 +12,6 @@
         "grants": [
           "authorization_code"
         ],
-        "pkce": true,
         "tokenUrl": "https://api.notion.com/v1/oauth/token",
         "type": "oauth2"
       }
@@ -86,7 +85,7 @@
         ],
         "type": "object"
       },
-      "name": "search"
+      "name": "searchWorkspace"
     },
     {
       "annotations": {
