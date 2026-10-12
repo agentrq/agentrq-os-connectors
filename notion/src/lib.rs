@@ -162,7 +162,7 @@ struct CreateComment {
 
 impl Connector for Notion {
     fn call_tool(request: ToolRequest) -> Result<ToolResponse, ConnectorError> {
-        Self::call_with(request, &mut |request| request.send())
+        Self::call_with(request, &mut |request| Ok(request.clone().send()?))
     }
 }
 
@@ -178,7 +178,7 @@ impl Notion {
         // Every arm answers `Result<ToolResponse, ToolError>`: a failure
         // becomes a tool error the agent can react to, not a failed call.
         let outcome: Result<ToolResponse, ToolError> = match request.tool.as_str() {
-            "search" => search(api, &request, &mut send),
+            "searchWorkspace" => search(api, &request, &mut send),
             "getPage" => get_page(api, &request, &mut send),
             "createPage" => create_page(api, &request, &mut send),
             "updatePage" => update_page(api, &request, &mut send),
@@ -230,7 +230,7 @@ fn step_ok(response: &Response, step: &str) -> Result<(), ToolError> {
 fn call_api(send: Sender<'_>, request: &Request, step: &str) -> Result<Value, ToolError> {
     let response = send(request)?;
     step_ok(&response, step)?;
-    response.json().map_err(ToolError::from)
+    Ok(response.json().map_err(ConnectorError::from)?)
 }
 
 /// Plans a JSON POST.
@@ -1862,7 +1862,7 @@ mod tests {
     #[test]
     fn headers_carry_the_pinned_api_version() {
         let mut stub = Stub::of(&[ok_json(r#"{"results": []}"#)]);
-        let _ = call("search", r#"{"query": "x"}"#, &mut stub);
+        let _ = call("searchWorkspace", r#"{"query": "x"}"#, &mut stub);
         assert_eq!(stub.seen.len(), 1);
         assert_eq!(
             header(&stub.seen[0], "notion-version"),
@@ -2038,7 +2038,7 @@ mod tests {
             ]}"#,
         )]);
         let result = answered(call(
-            "search",
+            "searchWorkspace",
             r#"{"query": "tasks", "filter": "page", "pageSize": 5}"#,
             &mut stub,
         ));
@@ -2056,7 +2056,7 @@ mod tests {
 
         let mut stub = Stub::of(&[ok_json(r#"{"results": []}"#)]);
         let _ = call(
-            "search",
+            "searchWorkspace",
             r#"{"query": "x", "filter": "dataSource"}"#,
             &mut stub,
         );
@@ -2065,10 +2065,14 @@ mod tests {
             json!({"property": "object", "value": "data_source"})
         );
         let mut stub = Stub::of(&[ok_json(r#"{"results": []}"#)]);
-        let _ = call("search", r#"{"query": "x", "filter": "all"}"#, &mut stub);
+        let _ = call(
+            "searchWorkspace",
+            r#"{"query": "x", "filter": "all"}"#,
+            &mut stub,
+        );
         assert!(body_json(&stub.seen[0]).get("filter").is_none());
         let mut stub = Stub::of(&[ok_json(r#"{"results": []}"#)]);
-        let _ = call("search", r#"{"query": "x"}"#, &mut stub);
+        let _ = call("searchWorkspace", r#"{"query": "x"}"#, &mut stub);
         assert!(body_json(&stub.seen[0]).get("filter").is_none());
         assert!(body_json(&stub.seen[0]).get("page_size").is_none());
     }
@@ -2077,13 +2081,13 @@ mod tests {
     fn search_surfaces_api_errors() {
         let mut stub = Stub::of(&[response(401, "unauthorized")]);
         assert!(is_tool_error(&call(
-            "search",
+            "searchWorkspace",
             r#"{"query": "x"}"#,
             &mut stub
         )));
         let mut stub = Stub::of(&[response(200, "not json")]);
         assert!(is_tool_error(&call(
-            "search",
+            "searchWorkspace",
             r#"{"query": "x"}"#,
             &mut stub
         )));
@@ -2235,7 +2239,7 @@ mod tests {
         // resolution untouched, so each tool makes exactly one call.
         let id = "12345678-1234-1234-1234-123456789abc";
         let calls = [
-            ("search", r#"{"query": "x"}"#.to_string()),
+            ("searchWorkspace", r#"{"query": "x"}"#.to_string()),
             ("getPage", format!(r#"{{"pageId": "{id}"}}"#)),
             ("createPage", format!(r#"{{"parent": {{"page": "{id}"}}}}"#)),
             (
