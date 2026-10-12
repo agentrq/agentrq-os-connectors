@@ -649,7 +649,7 @@ fn batch_update_request(
     if let Some(write_control) = write_control {
         body["writeControl"] = write_control;
     }
-    Ok(Request::post(api.batch_update(presentation_id)).json(&body)?)
+    Ok(Request::post(api.batch_update(presentation_id)).json(&body)?) // coverage: exclude — Request::json serializes a serde_json::Value here, which is infallible
 }
 
 /// An `insertText` request writing `text` at the start of a placeholder.

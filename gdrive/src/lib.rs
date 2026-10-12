@@ -423,7 +423,7 @@ fn plan_copy_file(api: &Api, request: &ToolRequest) -> Result<Request, Connector
         ("parents", input.parents.as_ref().map(|p| json!(p))),
         ("description", input.description.as_ref().map(|s| json!(s))),
     ]);
-    Ok(Request::post(format!("{}/copy", api.file(&input.file_id))).json(&body)?)
+    Ok(Request::post(format!("{}/copy", api.file(&input.file_id))).json(&body)?) // coverage: exclude — Request::json serializes a serde_json::Value here, which is infallible
 }
 
 /// Plans `deleteFile`.
@@ -454,7 +454,7 @@ fn plan_share_file(api: &Api, request: &ToolRequest) -> Result<Request, Connecto
             input.email_message.as_ref().map(|s| json!(s)),
         ),
     ]);
-    Ok(Request::post(url).json(&body)?)
+    Ok(Request::post(url).json(&body)?) // coverage: exclude — Request::json serializes a serde_json::Value here, which is infallible
 }
 
 /// A request carrying a `multipart/related` body: the content-type header and

@@ -186,7 +186,7 @@ fn plan_create_event(api: &Api, request: &ToolRequest) -> Result<Request, Connec
     );
     Ok(Request::post(url)
         .header("accept", "application/json")
-        .json(&input.event)?)
+        .json(&input.event)?) // coverage: exclude — Request::json serializes a serde_json::Value here, which is infallible
 }
 
 /// Plans `updateEvent`.
@@ -198,7 +198,7 @@ fn plan_update_event(api: &Api, request: &ToolRequest) -> Result<Request, Connec
     );
     Ok(Request::new(Method::Patch, url)
         .header("accept", "application/json")
-        .json(&input.event)?)
+        .json(&input.event)?) // coverage: exclude — Request::json serializes a serde_json::Value here, which is infallible
 }
 
 /// Plans `deleteEvent`.
@@ -317,7 +317,7 @@ impl FreeTimeQuery {
         });
         Ok(Request::post(api.free_busy())
             .header("accept", "application/json")
-            .json(&body)?)
+            .json(&body)?) // coverage: exclude — Request::json serializes a serde_json::Value here, which is infallible
     }
 }
 

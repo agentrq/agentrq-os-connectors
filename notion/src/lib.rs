@@ -2106,7 +2106,7 @@ mod tests {
         // takes no input); malformed JSON must fail fast as a tool error
         // and send nothing.
         for tool in [
-            "search",
+            "searchWorkspace",
             "getPage",
             "createPage",
             "updatePage",

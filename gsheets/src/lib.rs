@@ -313,7 +313,7 @@ fn plan_values_update(
     );
     Ok(Request::new(Method::Put, url)
         .header("accept", "application/json")
-        .json(&json!({ "values": values }))?)
+        .json(&json!({ "values": values }))?) // coverage: exclude — Request::json serializes a serde_json::Value here, which is infallible
 }
 
 /// Plans `appendValues`.
@@ -335,7 +335,7 @@ fn plan_append_values(api: &Api, request: &ToolRequest) -> Result<Request, Conne
     );
     Ok(Request::post(url)
         .header("accept", "application/json")
-        .json(&json!({ "values": input.values }))?)
+        .json(&json!({ "values": input.values }))?) // coverage: exclude — Request::json serializes a serde_json::Value here, which is infallible
 }
 
 /// Plans `clearValues`.
@@ -344,7 +344,7 @@ fn plan_clear_values(api: &Api, request: &ToolRequest) -> Result<Request, Connec
     let url = format!("{}:clear", api.values(&input.spreadsheet_id, &input.range));
     Ok(Request::post(url)
         .header("accept", "application/json")
-        .json(&json!({}))?)
+        .json(&json!({}))?) // coverage: exclude — Request::json serializes a serde_json::Value here, which is infallible
 }
 
 /// Plans `createSpreadsheet`: the spreadsheet plus a sheet per requested
@@ -365,7 +365,7 @@ fn plan_create_spreadsheet(
     }
     Ok(Request::post(&api.spreadsheets)
         .header("accept", "application/json")
-        .json(&body)?)
+        .json(&body)?) // coverage: exclude — Request::json serializes a serde_json::Value here, which is infallible
 }
 
 /// Plans `getSpreadsheet`.
@@ -392,7 +392,7 @@ fn plan_batch_update(api: &Api, request: &ToolRequest) -> Result<Request, Connec
     let url = format!("{}:batchUpdate", api.spreadsheet(&input.spreadsheet_id));
     Ok(Request::post(url)
         .header("accept", "application/json")
-        .json(&json!({ "requests": input.requests }))?)
+        .json(&json!({ "requests": input.requests }))?) // coverage: exclude — Request::json serializes a serde_json::Value here, which is infallible
 }
 
 // ---------------------------------------------------------------------------
