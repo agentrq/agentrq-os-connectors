@@ -76,7 +76,7 @@
         ],
         "type": "object"
       },
-      "name": "search"
+      "name": "searchWorkspace"
     },
     {
       "annotations": {

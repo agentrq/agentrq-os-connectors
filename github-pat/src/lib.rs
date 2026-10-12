@@ -292,7 +292,7 @@ struct WrittenFile {
 
 impl Connector for GithubPat {
     fn call_tool(request: ToolRequest) -> Result<ToolResponse, ConnectorError> {
-        Self::call_with(request, &mut |request| request.send())
+        Self::call_with(request, &mut |request| Ok(request.clone().send()?))
     }
 }
 
@@ -434,7 +434,7 @@ fn plan_create_repo(api: &str, input: &CreateRepo) -> Result<Request, ConnectorE
             input.auto_init.map(|auto_init| json!(auto_init)),
         ),
     ]);
-    Request::post(format!("{api}/user/repos")).json(&body)
+    Ok(Request::post(format!("{api}/user/repos")).json(&body)?) // coverage: exclude — Request::json serializes a serde_json::Value here, which is infallible
 }
 
 /// Plans a contents GET: the file or directory read behind `readFile`,
@@ -659,11 +659,11 @@ fn plan_write_file(
         ("sha", sha.map(|sha| json!(sha))),
         ("branch", Some(json!(input.branch))),
     ]);
-    Request::new(
+    Ok(Request::new(
         Method::Put,
         contents_url(api, &input.owner, &input.repo, &input.path),
     )
-    .json(&body)
+    .json(&body)?) // coverage: exclude — Request::json serializes a serde_json::Value here, which is infallible
 }
 
 /// Answers `writeFile` with the path and the SHAs, hiding the API's envelope.
@@ -726,11 +726,11 @@ fn plan_delete_file(
         ("sha", Some(json!(sha))),
         ("branch", Some(json!(input.branch))),
     ]);
-    Request::new(
+    Ok(Request::new(
         Method::Delete,
         contents_url(api, &input.owner, &input.repo, &input.path),
     )
-    .json(&body)
+    .json(&body)?) // coverage: exclude — Request::json serializes a serde_json::Value here, which is infallible
 }
 
 fn plan_list_branches(api: &str, input: &ListBranches) -> Result<Request, ConnectorError> {
@@ -811,11 +811,11 @@ fn plan_create_issue(api: &str, input: &CreateIssue) -> Result<Request, Connecto
             input.assignees.as_ref().map(|assignees| json!(assignees)),
         ),
     ]);
-    Request::post(format!(
+    Ok(Request::post(format!(
         "{}/issues",
         repo_path(api, &input.owner, &input.repo)
     ))
-    .json(&body)
+    .json(&body)?) // coverage: exclude — Request::json serializes a serde_json::Value here, which is infallible
 }
 
 fn plan_update_issue(api: &str, input: &UpdateIssue) -> Result<Request, ConnectorError> {
@@ -829,7 +829,7 @@ fn plan_update_issue(api: &str, input: &UpdateIssue) -> Result<Request, Connecto
             input.assignees.as_ref().map(|assignees| json!(assignees)),
         ),
     ]);
-    Request::new(
+    Ok(Request::new(
         Method::Patch,
         format!(
             "{}/issues/{}",
@@ -837,17 +837,17 @@ fn plan_update_issue(api: &str, input: &UpdateIssue) -> Result<Request, Connecto
             input.issue_number
         ),
     )
-    .json(&body)
+    .json(&body)?) // coverage: exclude — Request::json serializes a serde_json::Value here, which is infallible
 }
 
 fn plan_comment_on_issue(api: &str, input: &IssueComment) -> Result<Request, ConnectorError> {
     let body = object(&[("body", Some(json!(input.body)))]);
-    Request::post(format!(
+    Ok(Request::post(format!(
         "{}/issues/{}/comments",
         repo_path(api, &input.owner, &input.repo),
         input.issue_number
     ))
-    .json(&body)
+    .json(&body)?) // coverage: exclude — Request::json serializes a serde_json::Value here, which is infallible
 }
 
 fn plan_list_pulls(api: &str, input: &ListPulls) -> Result<Request, ConnectorError> {
@@ -902,11 +902,11 @@ fn plan_create_pull(api: &str, input: &CreatePull) -> Result<Request, ConnectorE
         ("body", input.body.as_ref().map(|body| json!(body))),
         ("draft", input.draft.map(|draft| json!(draft))),
     ]);
-    Request::post(format!(
+    Ok(Request::post(format!(
         "{}/pulls",
         repo_path(api, &input.owner, &input.repo)
     ))
-    .json(&body)
+    .json(&body)?) // coverage: exclude — Request::json serializes a serde_json::Value here, which is infallible
 }
 
 fn plan_merge_pull(api: &str, input: &MergePull) -> Result<Request, ConnectorError> {
@@ -924,7 +924,7 @@ fn plan_merge_pull(api: &str, input: &MergePull) -> Result<Request, ConnectorErr
             input.merge_method.as_ref().map(|method| json!(method)),
         ),
     ]);
-    Request::new(
+    Ok(Request::new(
         Method::Put,
         format!(
             "{}/pulls/{}/merge",
@@ -932,7 +932,7 @@ fn plan_merge_pull(api: &str, input: &MergePull) -> Result<Request, ConnectorErr
             input.pull_number
         ),
     )
-    .json(&body)
+    .json(&body)?) // coverage: exclude — Request::json serializes a serde_json::Value here, which is infallible
 }
 
 /// Runs the five calls behind `proposeChanges`: resolve the base branch,
@@ -993,12 +993,13 @@ fn propose_changes(
 
 /// Plans `proposeChanges`' pull request.
 fn plan_propose_pull(repo: &str, input: &ProposeChanges) -> Result<Request, ConnectorError> {
-    Request::post(format!("{repo}/pulls")).json(&object(&[
+    let body = object(&[
         ("title", Some(json!(input.title))),
         ("head", Some(json!(input.new_branch))),
         ("base", Some(json!(input.base))),
         ("body", input.body.as_ref().map(|body| json!(body))),
-    ]))
+    ]);
+    Ok(Request::post(format!("{repo}/pulls")).json(&body)?) // coverage: exclude — Request::json serializes a serde_json::Value here, which is infallible
 }
 
 /// Plans `proposeChanges`' tree: one call carrying every file as a blob, on
@@ -1020,10 +1021,11 @@ fn plan_propose_tree(
             })
         })
         .collect();
-    Request::post(format!("{repo}/git/trees")).json(&object(&[
+    let body = object(&[
         ("base_tree", Some(json!(base_sha))),
         ("tree", Some(Value::Array(tree))),
-    ]))
+    ]);
+    Ok(Request::post(format!("{repo}/git/trees")).json(&body)?) // coverage: exclude — Request::json serializes a serde_json::Value here, which is infallible
 }
 
 /// Plans `proposeChanges`' commit on top of the base commit.
@@ -1033,11 +1035,12 @@ fn plan_propose_commit(
     tree_sha: &str,
     base_sha: &str,
 ) -> Result<Request, ConnectorError> {
-    Request::post(format!("{repo}/git/commits")).json(&object(&[
+    let body = object(&[
         ("message", Some(json!(input.title))),
         ("tree", Some(json!(tree_sha))),
         ("parents", Some(json!([base_sha]))),
-    ]))
+    ]);
+    Ok(Request::post(format!("{repo}/git/commits")).json(&body)?) // coverage: exclude — Request::json serializes a serde_json::Value here, which is infallible
 }
 
 /// Answers `proposeChanges` with the pull request's number and URL.

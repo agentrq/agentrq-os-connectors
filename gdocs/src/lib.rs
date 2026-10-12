@@ -81,7 +81,7 @@ enum Edit {
 
 impl Connector for Gdocs {
     fn call_tool(request: ToolRequest) -> Result<ToolResponse, ConnectorError> {
-        Self::call_with(request, |request| request.send())
+        Self::call_with(request, |request| Ok(request.clone().send()?))
     }
 }
 
@@ -545,9 +545,9 @@ fn json_get(url: String) -> Request {
 
 /// A POST request carrying a JSON body, expecting a JSON answer.
 fn json_post(url: String, body: &Value) -> Result<Request, ConnectorError> {
-    Request::post(url)
+    Ok(Request::post(url)
         .header("accept", "application/json")
-        .json(body)
+        .json(body)?) // coverage: exclude — Request::json serializes a serde_json::Value here, which is infallible
 }
 
 /// Appends the present query parameters to `url`, percent-encoding each value.

@@ -163,7 +163,7 @@ struct Guest;
 
 impl Transport for Guest {
     fn send(&self, request: Request) -> Result<Response, ConnectorError> {
-        request.send()
+        Ok(request.send()?)
     }
 }
 
@@ -199,7 +199,7 @@ impl<T: Transport> Api<T> {
         if response.body.is_empty() {
             return Ok(Value::Null);
         }
-        Ok(response.json()?)
+        Ok(response.json().map_err(ConnectorError::from)?)
     }
 
     /// GETs a URL, asking for JSON back.
@@ -212,7 +212,8 @@ impl<T: Transport> Api<T> {
         self.send(
             Request::post(url)
                 .header("accept", "application/json")
-                .json(body)?, // coverage: exclude — post_json serializes a serde_json::Value, which cannot fail
+                .json(body)
+                .map_err(ConnectorError::from)?, // coverage: exclude — post_json serializes a serde_json::Value, which cannot fail
         )
     }
 
@@ -221,7 +222,8 @@ impl<T: Transport> Api<T> {
         self.send(
             Request::new(Method::Patch, url)
                 .header("accept", "application/json")
-                .json(body)?, // coverage: exclude — patch_json serializes a serde_json::Value, which cannot fail
+                .json(body)
+                .map_err(ConnectorError::from)?, // coverage: exclude — patch_json serializes a serde_json::Value, which cannot fail
         )
     }
 

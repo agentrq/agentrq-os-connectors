@@ -212,7 +212,7 @@ struct ListPipelines {
 
 impl Connector for Gitlab {
     fn call_tool(request: ToolRequest) -> Result<ToolResponse, ConnectorError> {
-        Self::call_with(request, |request| request.send())
+        Self::call_with(request, |request| Ok(request.clone().send()?))
     }
 }
 
@@ -429,7 +429,7 @@ fn plan_create_project(api: &str, request: &ToolRequest) -> Result<Request, Conn
                 .map(|initialize| json!(initialize)),
         ),
     ]);
-    Request::post(format!("{api}/projects")).json(&body)
+    Ok(Request::post(format!("{api}/projects")).json(&body)?) // coverage: exclude — Request::json serializes a serde_json::Value here, which is infallible
 }
 
 fn plan_list_directory(api: &str, request: &ToolRequest) -> Result<Request, ConnectorError> {
@@ -450,11 +450,11 @@ fn plan_delete_file(api: &str, request: &ToolRequest) -> Result<Request, Connect
             input.commit_message.as_ref().map(|message| json!(message)),
         ),
     ]);
-    Request::new(
+    Ok(Request::new(
         Method::Delete,
         file_path(api, &input.project_id, &input.file_path),
     )
-    .json(&body)
+    .json(&body)?) // coverage: exclude — Request::json serializes a serde_json::Value here, which is infallible
 }
 
 fn plan_list_branches(api: &str, request: &ToolRequest) -> Result<Request, ConnectorError> {
@@ -527,7 +527,7 @@ fn plan_create_issue(api: &str, request: &ToolRequest) -> Result<Request, Connec
                 .map(|assignees| json!(assignees)),
         ),
     ]);
-    Request::post(format!("{}/issues", project_path(api, &input.project_id))).json(&body)
+    Ok(Request::post(format!("{}/issues", project_path(api, &input.project_id))).json(&body)?) // coverage: exclude — Request::json serializes a serde_json::Value here, which is infallible
 }
 
 fn plan_update_issue(api: &str, request: &ToolRequest) -> Result<Request, ConnectorError> {
@@ -554,7 +554,7 @@ fn plan_update_issue(api: &str, request: &ToolRequest) -> Result<Request, Connec
                 .map(|assignees| json!(assignees)),
         ),
     ]);
-    Request::new(
+    Ok(Request::new(
         Method::Put,
         format!(
             "{}/issues/{}",
@@ -562,18 +562,18 @@ fn plan_update_issue(api: &str, request: &ToolRequest) -> Result<Request, Connec
             input.issue_iid
         ),
     )
-    .json(&body)
+    .json(&body)?) // coverage: exclude — Request::json serializes a serde_json::Value here, which is infallible
 }
 
 fn plan_comment_on_issue(api: &str, request: &ToolRequest) -> Result<Request, ConnectorError> {
     let input: CommentOnIssue = request.json()?;
     let body = object(&[("body", Some(json!(input.body)))]);
-    Request::post(format!(
+    Ok(Request::post(format!(
         "{}/issues/{}/notes",
         project_path(api, &input.project_id),
         input.issue_iid
     ))
-    .json(&body)
+    .json(&body)?) // coverage: exclude — Request::json serializes a serde_json::Value here, which is infallible
 }
 
 fn plan_list_merge_requests(api: &str, request: &ToolRequest) -> Result<Request, ConnectorError> {
@@ -603,11 +603,11 @@ fn plan_create_merge_request(api: &str, request: &ToolRequest) -> Result<Request
                 .map(|description| json!(description)),
         ),
     ]);
-    Request::post(format!(
+    Ok(Request::post(format!(
         "{}/merge_requests",
         project_path(api, &input.project_id)
     ))
-    .json(&body)
+    .json(&body)?) // coverage: exclude — Request::json serializes a serde_json::Value here, which is infallible
 }
 
 fn plan_accept_merge_request(api: &str, request: &ToolRequest) -> Result<Request, ConnectorError> {
@@ -628,7 +628,7 @@ fn plan_accept_merge_request(api: &str, request: &ToolRequest) -> Result<Request
                 .map(|remove| json!(remove)),
         ),
     ]);
-    Request::new(
+    Ok(Request::new(
         Method::Put,
         format!(
             "{}/merge_requests/{}/merge",
@@ -636,7 +636,7 @@ fn plan_accept_merge_request(api: &str, request: &ToolRequest) -> Result<Request
             input.merge_request_iid
         ),
     )
-    .json(&body)
+    .json(&body)?) // coverage: exclude — Request::json serializes a serde_json::Value here, which is infallible
 }
 
 fn plan_get_current_user(api: &str) -> Request {
@@ -779,7 +779,7 @@ fn plan_write_create(api: &str, input: &WriteFile) -> Result<Request, ConnectorE
         ("content", Some(json!(&input.content))),
         ("encoding", Some(json!("text"))),
     ]);
-    Request::post(file_path(api, &input.project_id, &input.file_path)).json(&body)
+    Ok(Request::post(file_path(api, &input.project_id, &input.file_path)).json(&body)?) // coverage: exclude — Request::json serializes a serde_json::Value here, which is infallible
 }
 
 /// Plans `writeFile`'s update step: the same body, sent as PUT.
@@ -790,11 +790,11 @@ fn plan_write_update(api: &str, input: &WriteFile) -> Result<Request, ConnectorE
         ("content", Some(json!(&input.content))),
         ("encoding", Some(json!("text"))),
     ]);
-    Request::new(
+    Ok(Request::new(
         Method::Put,
         file_path(api, &input.project_id, &input.file_path),
     )
-    .json(&body)
+    .json(&body)?) // coverage: exclude — Request::json serializes a serde_json::Value here, which is infallible
 }
 
 /// Turns the create/update answer into `writeFile`'s result: the file path,
@@ -958,11 +958,11 @@ fn plan_create_branch(api: &str, input: &ProposeChanges) -> Result<Request, Conn
         ("branch", Some(json!(&input.new_branch))),
         ("ref", Some(json!(&input.target_branch))),
     ]);
-    Request::post(format!(
+    Ok(Request::post(format!(
         "{}/repository/branches",
         project_path(api, &input.project_id)
     ))
-    .json(&body)
+    .json(&body)?) // coverage: exclude — Request::json serializes a serde_json::Value here, which is infallible
 }
 
 /// Plans `proposeChanges`' per-file existence probe on the new branch.
@@ -989,11 +989,11 @@ fn plan_commit_changes(
         ("commit_message", Some(json!(&input.title))),
         ("actions", Some(json!(actions))),
     ]);
-    Request::post(format!(
+    Ok(Request::post(format!(
         "{}/repository/commits",
         project_path(api, &input.project_id)
     ))
-    .json(&body)
+    .json(&body)?) // coverage: exclude — Request::json serializes a serde_json::Value here, which is infallible
 }
 
 /// Plans `proposeChanges`' merge request from the new branch.
@@ -1010,11 +1010,11 @@ fn plan_open_merge_request(api: &str, input: &ProposeChanges) -> Result<Request,
                 .map(|description| json!(description)),
         ),
     ]);
-    Request::post(format!(
+    Ok(Request::post(format!(
         "{}/merge_requests",
         project_path(api, &input.project_id)
     ))
-    .json(&body)
+    .json(&body)?) // coverage: exclude — Request::json serializes a serde_json::Value here, which is infallible
 }
 
 /// Turns the opened merge request into `proposeChanges`' answer: its
