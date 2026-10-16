@@ -17,8 +17,7 @@ delegated mailbox.
 
 | Tool | What it does |
 |---|---|
-| `listMessages` | Browse one folder (well-known name like `inbox`, `drafts`, `sentitems`, `deleteditems`, `archive`, or a folder id): headers with previews, no bodies (`folder`, `maxResults` up to 50, `skip`, `unreadOnly`) |
-| `searchMessages` | Search every folder with a KQL-style query and get full message contents in one call: headers, plain-text or HTML body, attachment metadata (`query`, `maxResults` up to 50, `includeHtml`) |
+| `searchMessages` | The one mail-finding tool: with a KQL-style `query` it searches every folder (or just `folder` when given) and returns full message contents — headers, plain-text or HTML body (`includeHtml`), attachment metadata; without a query it browses one folder, newest first. `unreadOnly` filters to unread in both modes; `maxResults` up to 50, `skip` pages |
 | `getMessage` | Read one message with its full body |
 | `sendMessage` | Send an email: `to`/`cc`/`bcc`, `subject`, `body` as text or HTML (`bodyType`), attachments ride along in the same call |
 | `replyToMessage` | Reply in one call via the Graph reply action: threading, quoting and `Re:` handled by the server; `replyAll` answers everyone |
