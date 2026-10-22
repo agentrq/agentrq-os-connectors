@@ -455,18 +455,21 @@ impl<T: Transport> Api<T> {
     /// can be specific.
     fn resolve_question(&self, form_id: &str, question: &str) -> Result<(usize, Value), ToolError> {
         let form = self.form(form_id)?;
-        let items: Vec<&Value> = form
+        // The index is the item's position in the form's full items array:
+        // the API's Location.index counts every item, not just questions.
+        let items: Vec<(usize, &Value)> = form
             .get("items")
             .and_then(Value::as_array)
             .map(|items| {
                 items
                     .iter()
-                    .filter(|item| item.get("questionItem").is_some())
+                    .enumerate()
+                    .filter(|(_, item)| item.get("questionItem").is_some())
                     .collect()
             })
             .unwrap_or_default();
         let mut matches = Vec::new();
-        for (index, item) in items.iter().enumerate() {
+        for (index, item) in &items {
             let id = item
                 .get("itemId")
                 .and_then(Value::as_str)
@@ -476,7 +479,7 @@ impl<T: Transport> Api<T> {
                 .and_then(Value::as_str)
                 .unwrap_or_default();
             if id == question || title.eq_ignore_ascii_case(question) {
-                matches.push((index, (*item).clone()));
+                matches.push((*index, (*item).clone()));
             }
         }
         match matches.as_slice() {
@@ -484,7 +487,7 @@ impl<T: Transport> Api<T> {
             [] => {
                 let titles: Vec<&str> = items
                     .iter()
-                    .filter_map(|item| item.get("title").and_then(Value::as_str))
+                    .filter_map(|(_, item)| item.get("title").and_then(Value::as_str))
                     .collect();
                 Err(ToolError::input(format!(
                     "No question {question:?} on this form; its questions are: {}",
@@ -1372,6 +1375,39 @@ mod tests {
     }
 
     #[test]
+    fn updates_a_question_after_a_non_question_item() {
+        // A text item sits before the question: Location.index counts every
+        // item in the form, so the question is at index 1, not 0.
+        let body = r#"{"formId":"f1","info":{"title":"Survey"},"items":[
+            {"itemId":"t0","title":"Intro","textItem":{}},
+            {"itemId":"q1","title":"Your name","questionItem":{"question":{"textQuestion":{"paragraph":false}}}}
+        ]}"#;
+        let updated_form = r#"{"form":{"formId":"f1","info":{"title":"Survey"},"items":[
+            {"itemId":"t0","title":"Intro","textItem":{}},
+            {"itemId":"q1","title":"Your name?","questionItem":{"question":{"textQuestion":{"paragraph":false}}}}
+        ]}}"#;
+        let api = client(&[
+            ((Method::Get, FORM_URL), 200, body),
+            ((Method::Post, BATCH_URL), 200, updated_form),
+        ]);
+
+        let response = run_tool(
+            &api,
+            "updateQuestion",
+            r#"{"formId":"f1","question":"q1","title":"Your name?"}"#,
+        )
+        .unwrap();
+        let answered: Value = serde_json::from_str(structured(&response)).unwrap();
+        assert_eq!(answered["id"], "q1");
+
+        let bodies = seen_bodies(&api);
+        assert_eq!(bodies.len(), 1);
+        let update = &bodies[0]["requests"][0]["updateItem"];
+        assert_eq!(update["location"]["index"], 1);
+        assert_eq!(update["item"]["itemId"], "q1");
+    }
+
+    #[test]
     fn updates_a_question_by_id_with_description_only() {
         let updated_form = r#"{"form":{"formId":"f1","info":{"title":"Survey"},"items":[
             {"itemId":"q1","title":"Your name","description":"First and last","questionItem":{"question":{"required":true,"textQuestion":{"paragraph":false}}}}
@@ -1527,6 +1563,30 @@ mod tests {
         assert_eq!(
             bodies[0]["requests"][0]["deleteItem"]["location"]["index"],
             0
+        );
+    }
+
+    #[test]
+    fn deletes_a_question_after_a_non_question_item() {
+        // Location.index counts every item: the text item at 0 pushes the
+        // question to index 1.
+        let body = r#"{"formId":"f1","info":{"title":"Survey"},"items":[
+            {"itemId":"t0","title":"Intro","textItem":{}},
+            {"itemId":"q1","title":"Your name","questionItem":{"question":{}}}
+        ]}"#;
+        let api = client(&[
+            ((Method::Get, FORM_URL), 200, body),
+            ((Method::Post, BATCH_URL), 204, ""),
+        ]);
+        let deleted =
+            run_tool(&api, "deleteQuestion", r#"{"formId":"f1","question":"q1"}"#).unwrap();
+        assert_eq!(structured(&deleted), r#"{"deleted":true}"#);
+
+        let bodies = seen_bodies(&api);
+        assert_eq!(bodies.len(), 1);
+        assert_eq!(
+            bodies[0]["requests"][0]["deleteItem"]["location"]["index"],
+            1
         );
     }
 

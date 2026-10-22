@@ -1,11 +1,11 @@
 //! Outlook Mail (Microsoft 365), redesigned around what agents actually do with mail.
 //!
 //! Instead of mirroring the Microsoft Graph mail endpoints one-for-one, this
-//! connector offers twelve task-shaped tools: each one completes a job —
-//! browsing a folder, searching with full bodies, reading a message, sending,
-//! replying, forwarding, drafting, organizing, fetching an attachment, listing
-//! the reachable mailboxes — in a single call, making whatever HTTP requests
-//! the job needs internally.
+//! connector offers eleven task-shaped tools: each one completes a job —
+//! finding mail by browsing a folder or searching with full bodies, reading a
+//! message, sending, replying, forwarding, drafting, organizing, fetching an
+//! attachment, listing the reachable mailboxes — in a single call, making
+//! whatever HTTP requests the job needs internally.
 //!
 //! The host runs the OAuth 2.0 sign-in, refreshes the token and adds
 //! `Authorization: Bearer …` after each request leaves the guest: this
@@ -35,17 +35,11 @@ pub const DEFAULT_API_BASE: &str = "https://graph.microsoft.com";
 const DEFAULT_SEARCH_RESULTS: u32 = 10;
 const MAX_SEARCH_RESULTS: u32 = 50;
 
-/// The default and maximum number of messages `listMessages` returns.
-const DEFAULT_LIST_RESULTS: u32 = 10;
-const MAX_LIST_RESULTS: u32 = 50;
-
 /// How many messages `organizeMessage` resolves when given a bulk `query`.
 /// Graph `$search` returns at most 250 results.
 const BULK_LIST_LIMIT: u32 = 250;
 
-/// Message fields for listings: headers and metadata, no body.
-const LIST_SELECT: &str = "id,subject,from,toRecipients,ccRecipients,receivedDateTime,bodyPreview,isRead,hasAttachments,parentFolderId,conversationId,importance";
-/// Message fields for full reads: everything in `LIST_SELECT` plus the body.
+/// Message fields for full reads: headers, metadata and the body.
 const FULL_SELECT: &str = "id,subject,from,toRecipients,ccRecipients,receivedDateTime,bodyPreview,body,isRead,hasAttachments,parentFolderId,conversationId,importance";
 
 /// The connector.
@@ -72,7 +66,6 @@ impl OutlookMail {
         let root = base.trim_end_matches('/');
         let mut send = send;
         let payload = match request.tool.as_str() {
-            "listMessages" => list_messages(root, &request.json()?, &mut send),
             "searchMessages" => search_messages(root, &request.json()?, &mut send),
             "getMessage" => get_message(root, &request.json()?, &mut send),
             "sendMessage" => send_message(root, &request.json()?, &mut send),
@@ -185,20 +178,13 @@ impl OrganizeAction {
 
 #[derive(Debug, Deserialize)]
 #[serde(rename_all = "camelCase")]
-struct ListMessages {
-    mailbox: Option<String>,
-    folder: Option<String>,
-    max_results: Option<u32>,
-    skip: Option<u32>,
-    unread_only: Option<bool>,
-}
-
-#[derive(Debug, Deserialize)]
-#[serde(rename_all = "camelCase")]
 struct SearchMessages {
     mailbox: Option<String>,
-    query: String,
+    query: Option<String>,
+    folder: Option<String>,
+    unread_only: Option<bool>,
     max_results: Option<u32>,
+    skip: Option<u32>,
     include_html: Option<bool>,
 }
 
@@ -660,41 +646,10 @@ fn body_type_or(body_type: &Option<String>) -> Result<&str, ConnectorError> {
     }
 }
 
-fn list_messages(
-    root: &str,
-    input: &ListMessages,
-    send: &mut dyn FnMut(&Request) -> Result<Response, ConnectorError>,
-) -> Result<Value, ToolError> {
-    let max = input
-        .max_results
-        .unwrap_or(DEFAULT_LIST_RESULTS)
-        .clamp(1, MAX_LIST_RESULTS);
-    let folder = input.folder.as_deref().unwrap_or("inbox");
-    let mut params = vec![
-        ("$top", Some(max.to_string())),
-        ("$skip", Some(input.skip.unwrap_or(0).to_string())),
-        ("$select", Some(LIST_SELECT.to_string())),
-    ];
-    if input.unread_only.unwrap_or(false) {
-        params.push(("$filter", Some("isRead eq false".to_string())));
-    }
-    let listed = step(
-        send,
-        &get(with_query(
-            &mailbox_url(
-                root,
-                &input.mailbox,
-                &format!("mailFolders/{}/messages", encode(folder)),
-            ),
-            &params,
-        )),
-        "listing messages",
-        &json!({}),
-    )?;
-    let messages = messages_in(&listed, "listing messages", false)?;
-    Ok(json!({ "messages": messages, "folder": folder }))
-}
-
+/// The one mail-finding tool. With a query it searches — every folder, or
+/// `folder` when the agent named one explicitly; without a query (or a blank
+/// one) it browses `folder`, newest first. Both modes return full message
+/// bodies, so there is never a list-then-get round trip.
 fn search_messages(
     root: &str,
     input: &SearchMessages,
@@ -706,31 +661,48 @@ fn search_messages(
         .clamp(1, MAX_SEARCH_RESULTS);
     let include_html = input.include_html.unwrap_or(false);
     let prefer = body_prefer(include_html);
-    let headers = [
-        ("ConsistencyLevel", "eventual"),
-        ("Prefer", prefer.as_str()),
+    // A blank query is not a search: whitespace-only input browses.
+    let query = input
+        .query
+        .as_deref()
+        .map(str::trim)
+        .filter(|query| !query.is_empty());
+    // Browse mode lists `folder` (default inbox); search mode without an
+    // explicit folder searches every folder.
+    let folder: Option<String> = match (&input.folder, query.is_some()) {
+        (Some(folder), _) => Some(folder.clone()),
+        (None, true) => None,
+        (None, false) => Some("inbox".to_string()),
+    };
+    let path = match &folder {
+        Some(folder) => format!("mailFolders/{}/messages", encode(folder)),
+        None => "messages".to_string(),
+    };
+    let mut headers: Vec<(&str, &str)> = vec![("Prefer", prefer.as_str())];
+    let mut params: Vec<(&str, Option<String>)> = vec![
+        ("$top", Some(max.to_string())),
+        ("$skip", Some(input.skip.unwrap_or(0).to_string())),
+        ("$select", Some(FULL_SELECT.to_string())),
     ];
+    if let Some(query) = query {
+        // `$search` needs the eventual-consistency header.
+        headers.push(("ConsistencyLevel", "eventual"));
+        params.push(("$search", Some(format!("\"{}\"", escape_search(query)))));
+    }
+    if input.unread_only.unwrap_or(false) {
+        params.push(("$filter", Some("isRead eq false".to_string())));
+    }
     let listed = step(
         send,
         &get_with(
-            with_query(
-                &mailbox_url(root, &input.mailbox, "messages"),
-                &[
-                    (
-                        "$search",
-                        Some(format!("\"{}\"", escape_search(&input.query))),
-                    ),
-                    ("$top", Some(max.to_string())),
-                    ("$select", Some(FULL_SELECT.to_string())),
-                ],
-            ),
+            with_query(&mailbox_url(root, &input.mailbox, &path), &params),
             &headers,
         ),
         "searching messages",
         &json!({}),
     )?;
     let messages = messages_in(&listed, "searching messages", true)?;
-    Ok(json!({ "messages": messages }))
+    Ok(json!({ "messages": messages, "folder": folder }))
 }
 
 fn get_message(
@@ -1600,19 +1572,21 @@ mod tests {
     }
 
     #[test]
-    fn lists_messages_end_to_end() {
+    fn search_messages_browses_a_folder_by_default() {
+        // No query: browse mode lists the inbox, newest first, with full
+        // bodies — no list-then-get round trip.
         let mut script = Script::new().will_answer(ok(&json!({
             "value": [
                 message_fixture("m1", "Hello", "Alice", "alice@x.test", "Hi"),
                 message_fixture("m2", "World", "Bob", "bob@x.test", "Yo"),
             ],
         })));
-        let result = script.call("listMessages", "{}");
+        let result = script.call("searchMessages", "{}");
         let payload = structured(&result);
         assert_eq!(payload["folder"], "inbox");
         assert_eq!(payload["messages"].as_array().unwrap().len(), 2);
         assert_eq!(payload["messages"][0]["subject"], "Hello");
-        assert!(payload["messages"][0].get("body").is_none());
+        assert_eq!(payload["messages"][0]["body"]["text"], "Hi");
         assert_eq!(script.seen_method(0), Method::Get);
         let url = script.seen_url(0);
         assert!(
@@ -1621,23 +1595,26 @@ mod tests {
         );
         assert!(url.contains("$top=10"), "{url}");
         assert!(url.contains("$select="), "{url}");
-        assert!(!url.contains("%2Cbody%2C"), "{url}");
+        assert!(url.contains("%2Cbody%2C"), "{url}");
+        assert!(!url.contains("$search"), "{url}");
         assert!(!url.contains("$filter"), "{url}");
+        assert_eq!(script.seen_header(0, "ConsistencyLevel"), None);
+        assert_eq!(
+            script.seen_header(0, "Prefer"),
+            Some("outlook.body-content-type=\"text\"")
+        );
     }
 
     #[test]
-    fn list_messages_supports_unread_only_and_paging() {
+    fn search_messages_browses_with_unread_only_and_paging() {
         let mut script = Script::new().will_answer(ok(&json!({})));
         let result = script.call(
-            "listMessages",
+            "searchMessages",
             r#"{"folder":"archive","maxResults":100,"skip":25,"unreadOnly":true,"mailbox":"shared@contoso.com"}"#,
         );
-        assert!(
-            structured(&result)["messages"]
-                .as_array()
-                .unwrap()
-                .is_empty()
-        );
+        let payload = structured(&result);
+        assert!(payload["messages"].as_array().unwrap().is_empty());
+        assert_eq!(payload["folder"], "archive");
         let url = script.seen_url(0);
         assert!(
             url.contains("/v1.0/users/shared%40contoso.com/mailFolders/archive/messages?"),
@@ -1646,12 +1623,13 @@ mod tests {
         assert!(url.contains("$top=50"), "{url}");
         assert!(url.contains("$skip=25"), "{url}");
         assert!(url.contains("$filter=isRead%20eq%20false"), "{url}");
+        assert_eq!(script.seen_header(0, "ConsistencyLevel"), None);
     }
 
     #[test]
-    fn list_messages_reports_failed_steps() {
+    fn search_messages_reports_failed_browse_steps() {
         let mut script = Script::new().will_answer(response(403, r#"{"error":"denied"}"#));
-        let result = script.call("listMessages", "{}");
+        let result = script.call("searchMessages", "{}");
         assert!(is_tool_error(&result));
     }
 
@@ -1664,6 +1642,8 @@ mod tests {
         let payload = structured(&result);
         assert_eq!(payload["messages"].as_array().unwrap().len(), 1);
         assert_eq!(payload["messages"][0]["body"]["text"], "Pay up");
+        // Searching without a folder spans every folder: `folder` is null.
+        assert_eq!(payload["folder"], Value::Null);
         let url = script.seen_url(0);
         assert!(url.contains("/v1.0/me/messages?"), "{url}");
         assert!(
@@ -1674,6 +1654,63 @@ mod tests {
         assert_eq!(
             script.seen_header(0, "Prefer"),
             Some("outlook.body-content-type=\"text\"")
+        );
+    }
+
+    #[test]
+    fn search_messages_scopes_search_to_folder() {
+        // An explicit folder with a query searches just that folder.
+        let mut script = Script::new().will_answer(ok(&json!({
+            "value": [message_fixture("m1", "Invoice", "Alice", "alice@x.test", "Pay up")],
+        })));
+        let result = script.call(
+            "searchMessages",
+            r#"{"query":"invoice","folder":"sentitems"}"#,
+        );
+        let payload = structured(&result);
+        assert_eq!(payload["folder"], "sentitems");
+        assert_eq!(payload["messages"][0]["body"]["text"], "Pay up");
+        let url = script.seen_url(0);
+        assert!(
+            url.contains("/v1.0/me/mailFolders/sentitems/messages?"),
+            "{url}"
+        );
+        assert!(url.contains("$search=%22invoice%22"), "{url}");
+        assert_eq!(script.seen_header(0, "ConsistencyLevel"), Some("eventual"));
+    }
+
+    #[test]
+    fn search_messages_treats_blank_query_as_browse() {
+        // Whitespace-only input is not a search: it browses the folder.
+        let mut script = Script::new().will_answer(ok(&json!({ "value": [] })));
+        let result = script.call("searchMessages", r#"{"query":"   "}"#);
+        assert_eq!(structured(&result)["folder"], "inbox");
+        let url = script.seen_url(0);
+        assert!(
+            url.contains("/v1.0/me/mailFolders/inbox/messages?"),
+            "{url}"
+        );
+        assert!(!url.contains("$search"), "{url}");
+        assert_eq!(script.seen_header(0, "ConsistencyLevel"), None);
+    }
+
+    #[test]
+    fn search_messages_applies_unread_only_to_search() {
+        let mut script = Script::new().will_answer(ok(&json!({ "value": [] })));
+        let _ = script.call("searchMessages", r#"{"query":"x","unreadOnly":true}"#);
+        let url = script.seen_url(0);
+        assert!(url.contains("$search=%22x%22"), "{url}");
+        assert!(url.contains("$filter=isRead%20eq%20false"), "{url}");
+        assert_eq!(script.seen_header(0, "ConsistencyLevel"), Some("eventual"));
+    }
+
+    #[test]
+    fn search_messages_browses_with_html_bodies() {
+        let mut script = Script::new().will_answer(ok(&json!({ "value": [] })));
+        let _ = script.call("searchMessages", r#"{"includeHtml":true}"#);
+        assert_eq!(
+            script.seen_header(0, "Prefer"),
+            Some("outlook.body-content-type=\"html\"")
         );
     }
 
@@ -2235,9 +2272,9 @@ mod tests {
     }
 
     #[test]
-    fn list_messages_reports_garbled_messages() {
+    fn search_messages_reports_garbled_browse_messages() {
         let mut script = Script::new().will_answer(ok(&json!({ "value": [42] })));
-        let result = script.call("listMessages", "{}");
+        let result = script.call("searchMessages", "{}");
         assert!(is_tool_error(&result));
     }
 
@@ -2381,7 +2418,6 @@ mod tests {
         // Every dispatch arm parses the body with `request.json()?`: malformed
         // JSON must fail input validation before anything is sent.
         for tool in [
-            "listMessages",
             "searchMessages",
             "getMessage",
             "sendMessage",
@@ -2448,7 +2484,7 @@ mod tests {
             DEFAULT_API_BASE
         );
         let tools = manifest["tools"].as_array().unwrap();
-        assert_eq!(tools.len(), 12);
+        assert_eq!(tools.len(), 11);
         let names: Vec<&str> = tools
             .iter()
             .map(|tool| tool["name"].as_str().unwrap())
@@ -2456,7 +2492,6 @@ mod tests {
         assert_eq!(
             names,
             [
-                "listMessages",
                 "searchMessages",
                 "getMessage",
                 "sendMessage",

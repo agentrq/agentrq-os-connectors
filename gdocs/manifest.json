@@ -175,6 +175,10 @@
               "type": "object"
             },
             "type": "array"
+          },
+          "tab": {
+            "description": "Tab ID or title to edit (see readDocument's tabs); edits default to the first tab",
+            "type": "string"
           }
         },
         "required": [

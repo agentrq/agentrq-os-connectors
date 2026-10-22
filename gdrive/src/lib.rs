@@ -435,12 +435,17 @@ fn plan_delete_file(api: &Api, request: &ToolRequest) -> Result<Request, Connect
 /// Plans `shareFile`.
 fn plan_share_file(api: &Api, request: &ToolRequest) -> Result<Request, ConnectorError> {
     let input: ShareFile = request.json()?;
+    // `emailMessage` is a query parameter on permissions.create, not a field
+    // of the Permission resource: in the body the API silently ignores it.
     let url = with_query(
         &format!("{}/permissions", api.file(&input.file_id)),
-        &[(
-            "sendNotificationEmail",
-            input.send_notification_email.map(|b| b.to_string()),
-        )],
+        &[
+            (
+                "sendNotificationEmail",
+                input.send_notification_email.map(|b| b.to_string()),
+            ),
+            ("emailMessage", input.email_message.clone()),
+        ],
     );
     let body = object(&[
         ("type", Some(json!(input.permission_type))),
@@ -448,10 +453,6 @@ fn plan_share_file(api: &Api, request: &ToolRequest) -> Result<Request, Connecto
         (
             "emailAddress",
             input.email_address.as_ref().map(|s| json!(s)),
-        ),
-        (
-            "emailMessage",
-            input.email_message.as_ref().map(|s| json!(s)),
         ),
     ]);
     Ok(Request::post(url).json(&body)?) // coverage: exclude — Request::json serializes a serde_json::Value here, which is infallible
@@ -902,7 +903,7 @@ mod tests {
         .unwrap();
         assert_eq!(
             stub.seen[2].url,
-            "https://www.googleapis.com/drive/v3/files/abc/permissions?sendNotificationEmail=false"
+            "https://www.googleapis.com/drive/v3/files/abc/permissions?sendNotificationEmail=false&emailMessage=FYI"
         );
         let body: Value = serde_json::from_slice(&stub.seen[2].body).unwrap();
         assert_eq!(
@@ -911,7 +912,6 @@ mod tests {
                 "type": "user",
                 "role": "reader",
                 "emailAddress": "alex@example.com",
-                "emailMessage": "FYI",
             })
         );
     }

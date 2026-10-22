@@ -428,7 +428,18 @@ fn run_list_tasks<T: Transport>(
         ],
     );
     let body = api.get(&url)?;
-    Ok(ToolResponse::structured(&items_of(&body))?) // coverage: exclude — structured() serializes a serde_json::Value, which cannot fail
+    // The agent needs `nextPageToken` to actually use the `pageToken` input:
+    // returning the bare items array made paging impossible.
+    let answered = object(&[
+        ("items", Some(items_of(&body))),
+        (
+            "nextPageToken",
+            body.get("nextPageToken")
+                .and_then(Value::as_str)
+                .map(Value::from),
+        ),
+    ]);
+    Ok(ToolResponse::structured(&answered)?) // coverage: exclude — structured() serializes a serde_json::Value, which cannot fail
 }
 
 fn run_add_task<T: Transport>(
@@ -817,7 +828,10 @@ mod tests {
         ]);
 
         let open = run_tool(&api, "listTasks", "{}").unwrap();
-        assert_eq!(structured(&open), r#"[{"id":"t1","title":"Buy milk"}]"#);
+        assert_eq!(
+            structured(&open),
+            r#"{"items":[{"id":"t1","title":"Buy milk"}]}"#
+        );
 
         let filtered = run_tool(
             &api,
@@ -825,7 +839,27 @@ mod tests {
             r#"{"list":"groceries","dueMin":"2026-10-01T00:00:00Z","showCompleted":true,"maxResults":50}"#,
         )
         .unwrap();
-        assert_eq!(structured(&filtered), "[]");
+        assert_eq!(structured(&filtered), r#"{"items":[]}"#);
+    }
+
+    #[test]
+    fn surfaces_the_next_page_token() {
+        let api = client(&[
+            lists_answer(),
+            (
+                (
+                    Method::Get,
+                    "https://tasks.test/tasks/v1/lists/@default/tasks?showCompleted=false&showHidden=false",
+                ),
+                200,
+                r#"{"items":[{"id":"t1","title":"Buy milk"}],"nextPageToken":"tok"}"#,
+            ),
+        ]);
+        let response = run_tool(&api, "listTasks", "{}").unwrap();
+        assert_eq!(
+            structured(&response),
+            r#"{"items":[{"id":"t1","title":"Buy milk"}],"nextPageToken":"tok"}"#
+        );
     }
 
     #[test]
@@ -840,7 +874,7 @@ mod tests {
             r#"{"items":[]}"#,
         )]);
         let response = run_tool(&api, "listTasks", r#"{"list":"@default"}"#).unwrap();
-        assert_eq!(structured(&response), "[]");
+        assert_eq!(structured(&response), r#"{"items":[]}"#);
     }
 
     #[test]
