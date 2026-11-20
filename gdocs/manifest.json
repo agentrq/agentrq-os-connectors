@@ -1,0 +1,196 @@
+{
+  "$schema": "https://connectors.agentrq.com/schemas/manifest/v1.json",
+  "auth": {
+    "required": true,
+    "schemes": [
+      {
+        "authorizationUrl": "https://accounts.google.com/o/oauth2/v2/auth",
+        "clientSecretRequired": true,
+        "extraAuthParams": {
+          "access_type": "offline",
+          "prompt": "select_account consent"
+        },
+        "grants": [
+          "authorization_code"
+        ],
+        "pkce": true,
+        "scopes": [
+          "https://www.googleapis.com/auth/documents"
+        ],
+        "tokenUrl": "https://oauth2.googleapis.com/token",
+        "type": "oauth2"
+      }
+    ]
+  },
+  "description": "Read, create and edit Google Docs with task-shaped tools: read a document as plain text, create a document with content, and apply typed edits in one batch.",
+  "icons": [
+    {
+      "mimeType": "image/svg+xml",
+      "sizes": [
+        "any"
+      ],
+      "src": "https://raw.githubusercontent.com/agentrq/agentrq-os-connectors/main/gdocs/icon.svg"
+    }
+  ],
+  "inputs": [
+    {
+      "default": "https://docs.googleapis.com",
+      "description": "Where the API is; it must be allowed below",
+      "name": "api_base",
+      "title": "API base URL",
+      "type": "string"
+    }
+  ],
+  "instructions": "Read the document with readDocument before editing so the structure you edit is current. Compose changes with editDocument, which applies typed edits in one batch; createDocument takes the initial content along. One call per outcome \u2014 never hand-roll multi-request sequences.",
+  "limits": {
+    "timeoutMs": 20000
+  },
+  "manifestVersion": 1,
+  "mcpVersion": "2026-07-28",
+  "name": "gdocs",
+  "permissions": {
+    "http": {
+      "allow": [
+        "https://docs.googleapis.com"
+      ]
+    }
+  },
+  "title": "Google Docs",
+  "tools": [
+    {
+      "annotations": {
+        "idempotentHint": true,
+        "openWorldHint": true,
+        "readOnlyHint": true
+      },
+      "description": "Read a Google Doc as plain text: its title and the text of its paragraphs, lists and tables",
+      "inputSchema": {
+        "additionalProperties": false,
+        "properties": {
+          "documentId": {
+            "description": "The document's ID",
+            "type": "string"
+          }
+        },
+        "required": [
+          "documentId"
+        ],
+        "type": "object"
+      },
+      "name": "readDocument",
+      "title": "Read a document"
+    },
+    {
+      "annotations": {
+        "destructiveHint": false,
+        "openWorldHint": true,
+        "readOnlyHint": false
+      },
+      "description": "Create a new Google Doc with a title, optionally with initial text content",
+      "inputSchema": {
+        "additionalProperties": false,
+        "properties": {
+          "text": {
+            "description": "Initial text content of the document",
+            "type": "string"
+          },
+          "title": {
+            "description": "Title of the new document",
+            "minLength": 1,
+            "type": "string"
+          }
+        },
+        "required": [
+          "title"
+        ],
+        "type": "object"
+      },
+      "name": "createDocument",
+      "title": "Create a document"
+    },
+    {
+      "annotations": {
+        "destructiveHint": true,
+        "openWorldHint": true,
+        "readOnlyHint": false
+      },
+      "description": "Apply typed edits to a Google Doc in one batch: append text, insert text at an index, replace text, or delete a range. Indices are UTF-16 code-unit offsets, as the Docs API counts them.",
+      "inputSchema": {
+        "additionalProperties": false,
+        "properties": {
+          "documentId": {
+            "description": "The document's ID",
+            "type": "string"
+          },
+          "edits": {
+            "description": "Edits to apply, in order, in a single batchUpdate call",
+            "items": {
+              "additionalProperties": false,
+              "properties": {
+                "endIndex": {
+                  "description": "End of the range to delete, exclusive (deleteRange)",
+                  "minimum": 0,
+                  "type": "integer"
+                },
+                "find": {
+                  "description": "Text to find (replace)",
+                  "type": "string"
+                },
+                "index": {
+                  "description": "UTF-16 code-unit index to insert at (insert)",
+                  "minimum": 0,
+                  "type": "integer"
+                },
+                "matchCase": {
+                  "description": "Match case when finding text (replace)",
+                  "type": "boolean"
+                },
+                "op": {
+                  "description": "The edit operation",
+                  "enum": [
+                    "append",
+                    "insert",
+                    "replace",
+                    "deleteRange"
+                  ],
+                  "type": "string"
+                },
+                "replace": {
+                  "description": "Replacement text (replace)",
+                  "type": "string"
+                },
+                "startIndex": {
+                  "description": "Start of the range to delete, inclusive (deleteRange)",
+                  "minimum": 0,
+                  "type": "integer"
+                },
+                "text": {
+                  "description": "Text to append or insert (append, insert)",
+                  "type": "string"
+                }
+              },
+              "required": [
+                "op"
+              ],
+              "type": "object"
+            },
+            "type": "array"
+          },
+          "tab": {
+            "description": "Tab ID or title to edit (see readDocument's tabs); edits default to the first tab",
+            "type": "string"
+          }
+        },
+        "required": [
+          "documentId",
+          "edits"
+        ],
+        "type": "object"
+      },
+      "name": "editDocument",
+      "title": "Edit a document"
+    }
+  ],
+  "version": "0.2.0",
+  "websiteUrl": "https://developers.google.com/workspace/docs/api"
+}

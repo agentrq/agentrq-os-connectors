@@ -1,0 +1,21 @@
+[package]
+name = "github"
+version = "0.2.0"
+edition = "2024"
+publish = false
+
+[lib]
+crate-type = ["cdylib"]
+
+[dependencies]
+base64 = "0.22"
+connectors-sdk = { path = "../sdk/connectors-sdk" }
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+
+[profile.release]
+opt-level = "s"
+strip = true
+
+# Its own workspace, not the folder's.
+[workspace]

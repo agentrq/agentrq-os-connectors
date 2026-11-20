@@ -1,0 +1,55 @@
+name: CI
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+
+jobs:
+  test:
+    name: test (${{ matrix.connector }})
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: true
+      matrix:
+        connector: [gcal, gdocs, gdrive, gforms, github, github-pat, gitlab, gitlab-pat, gmail, gsheets, gslides, gtasks, outlook-mail]
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: llvm-tools-preview
+
+      - uses: taiki-e/install-action@v2
+        with:
+          tool: cargo-llvm-cov
+
+      - name: Formatting
+        working-directory: ${{ matrix.connector }}
+        run: cargo fmt --all -- --check
+
+      - name: Tests with 100% coverage gate
+        working-directory: ${{ matrix.connector }}
+        # Soft coverage (lines) and hard coverage (regions) at 100%.
+        # Regions may carry a `// coverage: exclude — <reason>` note for the
+        # genuinely uncoverable (e.g. error arms on infallible serialization);
+        # the linter rejects notes without a reason and notes gone stale.
+        run: node ../scripts/check-coverage.mjs .
+
+  shim-test:
+    name: test (sdk/connectors-sdk)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: dtolnay/rust-toolchain@stable
+
+      - name: Formatting
+        working-directory: sdk/connectors-sdk
+        run: cargo fmt --all -- --check
+
+      # The shim is test infrastructure for the connectors above; its error
+      # closures wrap infallible operations, so it is tested but not gated.
+      - name: Tests
+        working-directory: sdk/connectors-sdk
+        run: cargo test
